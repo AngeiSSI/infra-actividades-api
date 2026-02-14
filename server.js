@@ -90,7 +90,7 @@ app.post('/login', async (req, res) => {
 
 /* ================= CATALOGO ================= */
 
-app.get('/catalogo', auth, async (req, res) => {
+app.get('/catalogo', async (req, res) => {
   const lista = await Catalogo.find();
   res.json(lista);
 });
