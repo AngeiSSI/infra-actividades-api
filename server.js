@@ -31,6 +31,17 @@ const User = mongoose.model('User', new mongoose.Schema({
   rol: String // lider | senior | coordinador
 }));
 
+/* 👇 IMPORTANTE: FORZAMOS nombre exacto colección catalogos */
+const Catalogo = mongoose.model(
+  'Catalogo',
+  new mongoose.Schema({
+    tipificacion: String,
+    actividad: String,
+    diasHabiles: Number
+  }),
+  'catalogos'
+);
+
 const Actividad = mongoose.model('Actividad', new mongoose.Schema({
   lider: String,
   proyecto: String,
@@ -97,6 +108,13 @@ app.post('/login', async (req, res) => {
   });
 });
 
+/* ================= CATALOGO ================= */
+
+app.get('/catalogo', auth, async (req, res) => {
+  const lista = await Catalogo.find();
+  res.json(lista);
+});
+
 /* ================= ACTIVIDADES ================= */
 
 /* GET actividades */
@@ -104,6 +122,7 @@ app.get('/actividades', auth, async (req, res) => {
 
   let filtro = {};
 
+  // 👇 SOLO lider ve sus tareas
   if (req.user.rol === 'lider') {
     filtro.lider = req.user.nombre;
   }
@@ -118,15 +137,9 @@ app.get('/actividades', auth, async (req, res) => {
 
     const progreso = calcularProgreso(act);
 
-    // vencida
     if (act.fechaCierre < hoy) {
       act.estadoCaso = "vencido";
-      act.alertaVencida = true;
     }
-
-    // alertas
-    if (progreso >= 0.7) act.alerta70 = true;
-    if (progreso >= 0.9) act.alerta90 = true;
 
     act._doc.progreso = Math.round(progreso * 100);
   }
@@ -138,19 +151,31 @@ app.get('/actividades', auth, async (req, res) => {
 /* POST crear actividad */
 app.post('/actividades', auth, async (req, res) => {
 
-  const nueva = await Actividad.create({
-    proyecto: req.body.proyecto,
-    tipificacion: req.body.tipificacion,
-    actividadCatalogo: req.body.actividadCatalogo,
-    descripcion: req.body.descripcion,
-    horas: req.body.horas,
+  const { tipificacion, actividadCatalogo } = req.body;
 
-    // 🔥 ESTE ES EL PUNTO CLAVE
-    lider: req.user.nombre
+  const cat = await Catalogo.findOne({
+    tipificacion,
+    actividad: actividadCatalogo
+  });
+
+  if (!cat) {
+    return res.status(400).json({ error: "Actividad no existe en catálogo" });
+  }
+
+  const fechaCreacion = new Date();
+  const fechaCierre = sumarDiasHabiles(fechaCreacion, cat.diasHabiles);
+
+  const nueva = await Actividad.create({
+    ...req.body,
+    lider: req.user.nombre,
+    fechaCreacion,
+    fechaCierre,
+    horasAcumuladas: req.body.horas || 0
   });
 
   res.status(201).json(nueva);
 });
+
 
 /* agregar observación */
 app.post('/actividades/:id/observacion', auth, async (req, res) => {
@@ -174,6 +199,7 @@ app.post('/actividades/:id/observacion', auth, async (req, res) => {
   res.json(actividad);
 });
 
+
 /* cerrar actividad */
 app.post('/actividades/:id/cerrar', auth, async (req, res) => {
 
@@ -189,7 +215,25 @@ app.post('/actividades/:id/cerrar', auth, async (req, res) => {
   res.json(actividad);
 });
 
-/* ================= CALCULAR PROGRESO ================= */
+
+/* ================= FUNCIONES ================= */
+
+function sumarDiasHabiles(fecha, dias) {
+  let resultado = new Date(fecha);
+  let agregados = 0;
+
+  while (agregados < dias) {
+    resultado.setDate(resultado.getDate() + 1);
+    const dia = resultado.getDay();
+
+    if (dia !== 0 && dia !== 6) {
+      agregados++;
+    }
+  }
+
+  return resultado;
+}
+
 function calcularProgreso(actividad) {
   if (!actividad.fechaCierre) return 0;
 
@@ -199,10 +243,7 @@ function calcularProgreso(actividad) {
 
   if (hoy >= fin) return 1;
 
-  const total = fin - inicio;
-  const transcurrido = hoy - inicio;
-
-  return Math.max(0, Math.min(1, transcurrido / total));
+  return Math.max(0, Math.min(1, (hoy - inicio) / (fin - inicio)));
 }
 
 /* ================= TEST ================= */
