@@ -104,12 +104,14 @@ app.get('/actividades', auth, async (req, res) => {
 
   let filtro = {};
 
-  // si es líder solo ve sus actividades
-  if (req.user.rol === "lider") {
+  // 🔒 Si es lider normal → solo ve sus actividades
+  if (req.user.rol === 'lider') {
     filtro.lider = req.user.nombre;
   }
 
-  const actividades = await Actividad.find(filtro);
+  // 🔓 Si es lider senior o coordinador → ve todo
+  const actividades = await Actividad.find(filtro).sort({ fechaCreacion: -1 });
+
   res.json(actividades);
 });
 
@@ -166,6 +168,22 @@ app.post('/actividades/:id/cerrar', auth, async (req, res) => {
 
   res.json(actividad);
 });
+
+/* ================= CALCULAR PROGRESO ================= */
+function calcularProgreso(actividad) {
+  if (!actividad.fechaCierre) return 0;
+
+  const inicio = new Date(actividad.fechaCreacion).getTime();
+  const fin = new Date(actividad.fechaCierre).getTime();
+  const hoy = Date.now();
+
+  if (hoy >= fin) return 1;
+
+  const total = fin - inicio;
+  const transcurrido = hoy - inicio;
+
+  return Math.max(0, Math.min(1, transcurrido / total));
+}
 
 /* ================= TEST ================= */
 
