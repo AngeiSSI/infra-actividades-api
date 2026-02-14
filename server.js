@@ -8,7 +8,13 @@ const jwt = require('jsonwebtoken');
 const app = express();
 const SECRET = process.env.JWT_SECRET || "infra-secret-key";
 
-app.use(cors());
+/* ================= CORS ================= */
+app.use(cors({
+  origin: "*",
+  methods: ["GET","POST","PUT","DELETE","OPTIONS"],
+  allowedHeaders: ["Content-Type","Authorization"]
+}));
+
 app.use(express.json());
 
 /* ================= DB ================= */
@@ -22,14 +28,18 @@ const User = mongoose.model('User', new mongoose.Schema({
   nombre: String,
   email: String,
   password: String,
-  rol: String
+  rol: String // lider | senior | coordinador
 }));
 
-const Catalogo = mongoose.model('Catalogo', new mongoose.Schema({
-  tipificacion: String,
-  actividad: String,
-  diasHabiles: Number
-}), 'catalogos');
+const Catalogo = mongoose.model(
+  'Catalogo',
+  new mongoose.Schema({
+    tipificacion: String,
+    actividad: String,
+    diasHabiles: Number
+  }),
+  'catalogos'
+);
 
 const Actividad = mongoose.model('Actividad', new mongoose.Schema({
   lider: String,
@@ -56,25 +66,35 @@ const Actividad = mongoose.model('Actividad', new mongoose.Schema({
 /* ================= AUTH ================= */
 
 function auth(req, res, next) {
-  const token = req.headers.authorization;
-  if (!token) return res.status(403).json({ error: "No autorizado" });
+
+  const header = req.headers['authorization'] || req.headers['Authorization'];
+
+  if (!header) {
+    return res.status(401).json({ error: "No autorizado - sin token" });
+  }
+
+  const token = header.replace("Bearer ", "");
 
   try {
-    const decoded = jwt.verify(token.replace("Bearer ", ""), SECRET);
+    const decoded = jwt.verify(token, SECRET);
     req.user = decoded;
     next();
-  } catch {
-    res.status(401).json({ error: "Token inválido" });
+  } catch (err) {
+    return res.status(401).json({ error: "Token inválido" });
   }
 }
 
 /* ================= LOGIN ================= */
 
 app.post('/login', async (req, res) => {
+
   const { email, password } = req.body;
 
   const user = await User.findOne({ email, password });
-  if (!user) return res.status(401).json({ error: "Credenciales inválidas" });
+
+  if (!user) {
+    return res.status(401).json({ error: "Credenciales inválidas" });
+  }
 
   const token = jwt.sign(
     { id: user._id, nombre: user.nombre, rol: user.rol },
@@ -84,13 +104,16 @@ app.post('/login', async (req, res) => {
 
   res.json({
     token,
-    usuario: { nombre: user.nombre, rol: user.rol }
+    usuario: {
+      nombre: user.nombre,
+      rol: user.rol
+    }
   });
 });
 
 /* ================= CATALOGO ================= */
 
-app.get('/catalogo', async (req, res) => {
+app.get('/catalogo', auth, async (req, res) => {
   const lista = await Catalogo.find();
   res.json(lista);
 });
@@ -101,7 +124,6 @@ app.get('/actividades', auth, async (req, res) => {
 
   let filtro = {};
 
-  // solo lider ve sus actividades
   if (req.user.rol === 'lider') {
     filtro.lider = req.user.nombre;
   }
@@ -110,24 +132,24 @@ app.get('/actividades', auth, async (req, res) => {
 
   const hoy = new Date();
 
-  actividades.forEach(a => {
-    if (!a.fechaCierre) return;
+  for (const act of actividades) {
 
-    const inicio = new Date(a.fechaCreacion).getTime();
-    const fin = new Date(a.fechaCierre).getTime();
-    const progreso = Math.min(1, Math.max(0, (Date.now() - inicio) / (fin - inicio)));
+    if (act.estado === "cerrado" || !act.fechaCierre) continue;
 
-    a._doc.progreso = Math.round(progreso * 100);
+    const progreso = calcularProgreso(act);
 
-    if (a.fechaCierre < hoy) {
-      a.estadoCaso = "vencido";
+    if (act.fechaCierre < hoy) {
+      act.estadoCaso = "vencido";
     }
-  });
+
+    act._doc.progreso = Math.round(progreso * 100);
+  }
 
   res.json(actividades);
 });
 
-/* CREAR */
+/* CREAR ACTIVIDAD */
+
 app.post('/actividades', auth, async (req, res) => {
 
   const { tipificacion, actividadCatalogo } = req.body;
@@ -137,7 +159,9 @@ app.post('/actividades', auth, async (req, res) => {
     actividad: actividadCatalogo
   });
 
-  if (!cat) return res.status(400).json({ error: "Actividad no existe en catálogo" });
+  if (!cat) {
+    return res.status(400).json({ error: "Actividad no existe en catálogo" });
+  }
 
   const fechaCreacion = new Date();
   const fechaCierre = sumarDiasHabiles(fechaCreacion, cat.diasHabiles);
@@ -146,50 +170,83 @@ app.post('/actividades', auth, async (req, res) => {
     ...req.body,
     lider: req.user.nombre,
     fechaCreacion,
-    fechaCierre,
-    horasAcumuladas: req.body.horas || 0
+    fechaCierre
   });
 
   res.status(201).json(nueva);
 });
 
 /* OBSERVACION */
+
 app.post('/actividades/:id/observacion', auth, async (req, res) => {
-  const act = await Actividad.findById(req.params.id);
 
-  act.observaciones.push({ comentario: req.body.comentario });
-  act.horasAcumuladas += req.body.horas || 0;
+  const { comentario, horas } = req.body;
 
-  await act.save();
+  const actividad = await Actividad.findById(req.params.id);
 
-  res.json(act);
+  if (!actividad) {
+    return res.status(404).json({ error: "Actividad no encontrada" });
+  }
+
+  actividad.observaciones.push({ comentario });
+
+  if (horas) {
+    actividad.horasAcumuladas += horas;
+  }
+
+  await actividad.save();
+
+  res.json(actividad);
 });
 
 /* CERRAR */
+
 app.post('/actividades/:id/cerrar', auth, async (req, res) => {
-  const act = await Actividad.findById(req.params.id);
-  act.estado = "cerrado";
-  await act.save();
-  res.json(act);
+
+  const actividad = await Actividad.findById(req.params.id);
+
+  if (!actividad) {
+    return res.status(404).json({ error: "Actividad no encontrada" });
+  }
+
+  actividad.estado = "cerrado";
+  await actividad.save();
+
+  res.json(actividad);
 });
 
 /* ================= UTILS ================= */
 
 function sumarDiasHabiles(fecha, dias) {
-  let result = new Date(fecha);
-  let added = 0;
+  let resultado = new Date(fecha);
+  let agregados = 0;
 
-  while (added < dias) {
-    result.setDate(result.getDate() + 1);
-    if (result.getDay() !== 0 && result.getDay() !== 6) added++;
+  while (agregados < dias) {
+    resultado.setDate(resultado.getDate() + 1);
+    const dia = resultado.getDay();
+    if (dia !== 0 && dia !== 6) agregados++;
   }
 
-  return result;
+  return resultado;
 }
 
-/* ================= START ================= */
+function calcularProgreso(actividad) {
+  if (!actividad.fechaCierre) return 0;
 
-app.get('/', (req,res)=> res.send("API OK 🚀"));
+  const inicio = new Date(actividad.fechaCreacion).getTime();
+  const fin = new Date(actividad.fechaCierre).getTime();
+  const hoy = Date.now();
+
+  if (hoy >= fin) return 1;
+
+  return (hoy - inicio) / (fin - inicio);
+}
+
+/* ================= TEST ================= */
+
+app.get('/', (req, res) => {
+  res.send('API Infra funcionando 🚀');
+});
 
 const port = process.env.PORT || 3000;
-app.listen(port, () => console.log("🚀 Server running"));
+app.listen(port, () => console.log("🚀 Server running on port", port));
