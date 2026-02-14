@@ -104,16 +104,36 @@ app.get('/actividades', auth, async (req, res) => {
 
   let filtro = {};
 
-  // 🔒 Si es lider normal → solo ve sus actividades
   if (req.user.rol === 'lider') {
     filtro.lider = req.user.nombre;
   }
 
-  // 🔓 Si es lider senior o coordinador → ve todo
   const actividades = await Actividad.find(filtro).sort({ fechaCreacion: -1 });
+
+  const hoy = new Date();
+
+  for (const act of actividades) {
+
+    if (act.estado === "cerrado" || !act.fechaCierre) continue;
+
+    const progreso = calcularProgreso(act);
+
+    // vencida
+    if (act.fechaCierre < hoy) {
+      act.estadoCaso = "vencido";
+      act.alertaVencida = true;
+    }
+
+    // alertas
+    if (progreso >= 0.7) act.alerta70 = true;
+    if (progreso >= 0.9) act.alerta90 = true;
+
+    act._doc.progreso = Math.round(progreso * 100);
+  }
 
   res.json(actividades);
 });
+
 
 /* POST crear actividad */
 app.post('/actividades', auth, async (req, res) => {
