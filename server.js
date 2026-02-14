@@ -117,7 +117,13 @@ app.get('/actividades', auth, async (req, res) => {
 app.post('/actividades', auth, async (req, res) => {
 
   const nueva = await Actividad.create({
-    ...req.body,
+    proyecto: req.body.proyecto,
+    tipificacion: req.body.tipificacion,
+    actividadCatalogo: req.body.actividadCatalogo,
+    descripcion: req.body.descripcion,
+    horas: req.body.horas,
+
+    // 🔥 ESTE ES EL PUNTO CLAVE
     lider: req.user.nombre
   });
 
