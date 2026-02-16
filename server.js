@@ -8,11 +8,13 @@ const jwt = require('jsonwebtoken');
 const app = express();
 const SECRET = process.env.JWT_SECRET || "infra-secret-key";
 
+console.log("🔐 SECRET:", SECRET);  // Para debuggear
+
 /* ================= CORS ================= */
 app.use(cors({
   origin: "*",
-  methods: ["GET","POST","PUT","DELETE","OPTIONS"],
-  allowedHeaders: ["Content-Type","Authorization"]
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
 app.use(express.json());
@@ -28,7 +30,7 @@ const User = mongoose.model('User', new mongoose.Schema({
   nombre: String,
   email: String,
   password: String,
-  rol: String // lider | senior | coordinador
+  rol: String
 }));
 
 const Catalogo = mongoose.model(
@@ -47,26 +49,21 @@ const Actividad = mongoose.model('Actividad', new mongoose.Schema({
   tipificacion: String,
   actividadCatalogo: String,
   descripcion: String,
-
   fechaCreacion: { type: Date, default: Date.now },
   fechaCierre: Date,
-
   estado: { type: String, default: "en progreso" },
   estadoCaso: { type: String, default: "no aplica" },
-
   horas: { type: Number, default: 0 },
   horasAcumuladas: { type: Number, default: 0 },
-
   observaciones: [{
     fecha: { type: Date, default: Date.now },
     comentario: String
   }]
 }), 'actividades');
 
-/* ================= AUTH ================= */
+/* ================= AUTH MIDDLEWARE ================= */
 
 function auth(req, res, next) {
-
   const header = req.headers['authorization'] || req.headers['Authorization'];
 
   if (!header) {
@@ -75,19 +72,23 @@ function auth(req, res, next) {
 
   const token = header.replace("Bearer ", "");
 
+  console.log("🔐 Token recibido:", token.substring(0, 30) + "...");
+  console.log("🔐 SECRET usado:", SECRET);
+
   try {
     const decoded = jwt.verify(token, SECRET);
+    console.log("✅ Token validado:", decoded);
     req.user = decoded;
     next();
   } catch (err) {
-    return res.status(401).json({ error: "Token inválido" });
+    console.error("❌ Error validando token:", err.message);
+    return res.status(401).json({ error: "Token inválido: " + err.message });
   }
 }
 
 /* ================= LOGIN ================= */
 
 app.post('/login', async (req, res) => {
-
   const { email, password } = req.body;
 
   const user = await User.findOne({ email, password });
@@ -102,6 +103,8 @@ app.post('/login', async (req, res) => {
     { expiresIn: '8h' }
   );
 
+  console.log("✅ Token generado:", token.substring(0, 30) + "...");
+
   res.json({
     token,
     usuario: {
@@ -114,6 +117,7 @@ app.post('/login', async (req, res) => {
 /* ================= CATALOGO ================= */
 
 app.get('/catalogo', auth, async (req, res) => {
+  console.log("📖 GET /catalogo - User:", req.user.nombre);
   const lista = await Catalogo.find();
   res.json(lista);
 });
@@ -121,6 +125,7 @@ app.get('/catalogo', auth, async (req, res) => {
 /* ================= ACTIVIDADES ================= */
 
 app.get('/actividades', auth, async (req, res) => {
+  console.log("📋 GET /actividades - User:", req.user.nombre, "Role:", req.user.rol);
 
   let filtro = {};
 
@@ -133,7 +138,6 @@ app.get('/actividades', auth, async (req, res) => {
   const hoy = new Date();
 
   for (const act of actividades) {
-
     if (act.estado === "cerrado" || !act.fechaCierre) continue;
 
     const progreso = calcularProgreso(act);
@@ -148,9 +152,10 @@ app.get('/actividades', auth, async (req, res) => {
   res.json(actividades);
 });
 
-/* CREAR ACTIVIDAD */
+/* ================= CREAR ACTIVIDAD ================= */
 
 app.post('/actividades', auth, async (req, res) => {
+  console.log("✏️ POST /actividades - User:", req.user.nombre);
 
   const { tipificacion, actividadCatalogo } = req.body;
 
@@ -176,9 +181,11 @@ app.post('/actividades', auth, async (req, res) => {
   res.status(201).json(nueva);
 });
 
-/* OBSERVACION */
+/* ================= AGREGAR OBSERVACIÓN ================= */
 
-app.post('/actividades/:id/observacion', auth, async (req, res) => {
+// ✅ CORREGIDO - Usar /observaciones (plural)
+app.post('/actividades/:id/observaciones', auth, async (req, res) => {
+  console.log("📝 POST /actividades/:id/observaciones - User:", req.user.nombre);
 
   const { comentario, horas } = req.body;
 
@@ -188,7 +195,7 @@ app.post('/actividades/:id/observacion', auth, async (req, res) => {
     return res.status(404).json({ error: "Actividad no encontrada" });
   }
 
-  actividad.observaciones.push({ comentario });
+  actividad.observaciones.push({ comentario, fecha: new Date() });
 
   if (horas) {
     actividad.horasAcumuladas += horas;
@@ -199,9 +206,27 @@ app.post('/actividades/:id/observacion', auth, async (req, res) => {
   res.json(actividad);
 });
 
-/* CERRAR */
+/* ================= CERRAR ACTIVIDAD ================= */
 
+// ✅ CORREGIDO - Aceptar tanto PUT como POST
+app.put('/actividades/:id/cerrar', auth, async (req, res) => {
+  console.log("🔒 PUT /actividades/:id/cerrar - User:", req.user.nombre);
+
+  const actividad = await Actividad.findById(req.params.id);
+
+  if (!actividad) {
+    return res.status(404).json({ error: "Actividad no encontrada" });
+  }
+
+  actividad.estado = "cerrado";
+  await actividad.save();
+
+  res.json(actividad);
+});
+
+// Mantener POST también por compatibilidad
 app.post('/actividades/:id/cerrar', auth, async (req, res) => {
+  console.log("🔒 POST /actividades/:id/cerrar - User:", req.user.nombre);
 
   const actividad = await Actividad.findById(req.params.id);
 
@@ -249,4 +274,7 @@ app.get('/', (req, res) => {
 });
 
 const port = process.env.PORT || 3000;
-app.listen(port, () => console.log("🚀 Server running on port", port));
+app.listen(port, () => {
+  console.log("🚀 Server running on port", port);
+  console.log("🔐 JWT_SECRET:", SECRET);
+});
