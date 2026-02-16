@@ -89,29 +89,43 @@ function auth(req, res, next) {
 /* ================= LOGIN ================= */
 
 app.post('/login', async (req, res) => {
+  console.log("🔓 POST /login");
+  
   const { email, password } = req.body;
 
-  const user = await User.findOne({ email, password });
+  console.log("  Email:", email);
+  console.log("  Password:", password ? "✅" : "❌");
 
-  if (!user) {
-    return res.status(401).json({ error: "Credenciales inválidas" });
-  }
+  try {
+    const user = await User.findOne({ email, password });
 
-  const token = jwt.sign(
-    { id: user._id, nombre: user.nombre, rol: user.rol },
-    SECRET,
-    { expiresIn: '8h' }
-  );
-
-  console.log("✅ Token generado:", token.substring(0, 30) + "...");
-
-  res.json({
-    token,
-    usuario: {
-      nombre: user.nombre,
-      rol: user.rol
+    if (!user) {
+      console.log("❌ Usuario no encontrado");
+      return res.status(401).json({ error: "Credenciales inválidas" });
     }
-  });
+
+    console.log("✅ Usuario encontrado:", user.nombre);
+
+    // ✅ CAMBIA ESTO:
+    const token = jwt.sign(
+      { id: user._id, nombre: user.nombre, rol: user.rol },
+      SECRET,
+      { expiresIn: '30d' }  // ← CAMBIO AQUÍ (antes era '8h')
+    );
+
+    console.log("✅ Token generado:", token.substring(0, 50) + "...");
+
+    res.json({
+      token,
+      usuario: {
+        nombre: user.nombre,
+        rol: user.rol
+      }
+    });
+  } catch (err) {
+    console.error("❌ Error en login:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /* ================= CATALOGO ================= */
