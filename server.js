@@ -6,7 +6,7 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 
 const app = express();
-const SECRET = process.env.JWT_SECRET || "infra-secret-key";
+const SECRET = "infra-secret-key";
 
 console.log("🔐 SECRET:", SECRET);  // Para debuggear
 
