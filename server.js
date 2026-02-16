@@ -8,7 +8,7 @@ const jwt = require('jsonwebtoken');
 const app = express();
 const SECRET = "infra-secret-key";
 
-console.log("🔐 SECRET:", SECRET);  // Para debuggear
+console.log("🔐 SECRET:", SECRET);
 
 /* ================= CORS ================= */
 app.use(cors({
@@ -20,30 +20,35 @@ app.use(cors({
 app.use(express.json());
 
 /* ================= DB ================= */
+console.log("📊 MONGO_URI:", process.env.MONGO_URI ? "✅ CONFIGURADO" : "❌ NO CONFIGURADO");
+
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MONGO CONECTADO"))
-  .catch(err => console.log("❌ ERROR MONGO:", err.message));
+  .catch(err => {
+    console.log("❌ ERROR MONGO:", err.message);
+    console.log("❌ MONGO_URI usado:", process.env.MONGO_URI);
+  });
 
 /* ================= MODELOS ================= */
 
-const User = mongoose.model('User', new mongoose.Schema({
+const userSchema = new mongoose.Schema({
   nombre: String,
   email: String,
   password: String,
   rol: String
-}));
+});
 
-const Catalogo = mongoose.model(
-  'Catalogo',
-  new mongoose.Schema({
-    tipificacion: String,
-    actividad: String,
-    diasHabiles: Number
-  }),
-  'catalogos'
-);
+const User = mongoose.model('User', userSchema, 'users');
 
-const Actividad = mongoose.model('Actividad', new mongoose.Schema({
+const catalogoSchema = new mongoose.Schema({
+  tipificacion: String,
+  actividad: String,
+  diasHabiles: Number
+});
+
+const Catalogo = mongoose.model('Catalogo', catalogoSchema, 'catalogos');
+
+const actividadSchema = new mongoose.Schema({
   lider: String,
   proyecto: String,
   tipificacion: String,
@@ -59,29 +64,35 @@ const Actividad = mongoose.model('Actividad', new mongoose.Schema({
     fecha: { type: Date, default: Date.now },
     comentario: String
   }]
-}), 'actividades');
+});
+
+const Actividad = mongoose.model('Actividad', actividadSchema, 'actividades');
 
 /* ================= AUTH MIDDLEWARE ================= */
 
 function auth(req, res, next) {
   const header = req.headers['authorization'] || req.headers['Authorization'];
 
+  console.log("\n🔐 AUTH MIDDLEWARE");
+  console.log("  Header existe:", !!header);
+
   if (!header) {
+    console.log("  ❌ NO HAY HEADER");
     return res.status(401).json({ error: "No autorizado - sin token" });
   }
 
-  const token = header.replace("Bearer ", "");
+  const token = header.replace("Bearer ", "").replace("bearer ", "");
 
-  console.log("🔐 Token recibido:", token.substring(0, 30) + "...");
-  console.log("🔐 SECRET usado:", SECRET);
+  console.log("  🔐 Token recibido:", token.substring(0, 30) + "...");
+  console.log("  🔐 SECRET usado para validar:", SECRET);
 
   try {
     const decoded = jwt.verify(token, SECRET);
-    console.log("✅ Token validado:", decoded);
+    console.log("  ✅ Token VÁLIDO:", decoded.nombre);
     req.user = decoded;
     next();
   } catch (err) {
-    console.error("❌ Error validando token:", err.message);
+    console.log("  ❌ Error validando token:", err.message);
     return res.status(401).json({ error: "Token inválido: " + err.message });
   }
 }
@@ -89,31 +100,31 @@ function auth(req, res, next) {
 /* ================= LOGIN ================= */
 
 app.post('/login', async (req, res) => {
-  console.log("🔓 POST /login");
+  console.log("\n🔓 POST /login");
+  console.log("  Body recibido:", req.body);
   
   const { email, password } = req.body;
 
-  console.log("  Email:", email);
-  console.log("  Password:", password ? "✅" : "❌");
-
   try {
+    console.log("  🔍 Buscando usuario:", email);
+    
     const user = await User.findOne({ email, password });
 
     if (!user) {
-      console.log("❌ Usuario no encontrado");
+      console.log("  ❌ Usuario NO encontrado");
+      console.log("  📊 Email buscado:", email);
       return res.status(401).json({ error: "Credenciales inválidas" });
     }
 
-    console.log("✅ Usuario encontrado:", user.nombre);
+    console.log("  ✅ Usuario encontrado:", user.nombre);
 
-    // ✅ CAMBIA ESTO:
     const token = jwt.sign(
       { id: user._id, nombre: user.nombre, rol: user.rol },
       SECRET,
-      { expiresIn: '30d' }  // ← CAMBIO AQUÍ (antes era '8h')
+      { expiresIn: '30d' }
     );
 
-    console.log("✅ Token generado:", token.substring(0, 50) + "...");
+    console.log("  ✅ Token generado:", token.substring(0, 50) + "...");
 
     res.json({
       token,
@@ -123,7 +134,7 @@ app.post('/login', async (req, res) => {
       }
     });
   } catch (err) {
-    console.error("❌ Error en login:", err);
+    console.error("  ❌ Error en login:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -131,127 +142,161 @@ app.post('/login', async (req, res) => {
 /* ================= CATALOGO ================= */
 
 app.get('/catalogo', auth, async (req, res) => {
-  console.log("📖 GET /catalogo - User:", req.user.nombre);
-  const lista = await Catalogo.find();
-  res.json(lista);
+  try {
+    console.log("\n📖 GET /catalogo - User:", req.user.nombre);
+    const lista = await Catalogo.find();
+    console.log("  ✅ Catálogo enviado:", lista.length, "items");
+    res.json(lista);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-/* ================= ACTIVIDADES ================= */
+/* ================= ACTIVIDADES - GET ================= */
 
 app.get('/actividades', auth, async (req, res) => {
-  console.log("📋 GET /actividades - User:", req.user.nombre, "Role:", req.user.rol);
+  try {
+    console.log("\n📋 GET /actividades - User:", req.user.nombre);
 
-  let filtro = {};
+    let filtro = {};
 
-  if (req.user.rol === 'lider') {
-    filtro.lider = req.user.nombre;
-  }
-
-  const actividades = await Actividad.find(filtro).sort({ fechaCreacion: -1 });
-
-  const hoy = new Date();
-
-  for (const act of actividades) {
-    if (act.estado === "cerrado" || !act.fechaCierre) continue;
-
-    const progreso = calcularProgreso(act);
-
-    if (act.fechaCierre < hoy) {
-      act.estadoCaso = "vencido";
+    if (req.user.rol === 'lider') {
+      filtro.lider = req.user.nombre;
     }
 
-    act._doc.progreso = Math.round(progreso * 100);
-  }
+    const actividades = await Actividad.find(filtro).sort({ fechaCreacion: -1 });
 
-  res.json(actividades);
+    console.log("  ✅ Actividades enviadas:", actividades.length);
+
+    const hoy = new Date();
+
+    for (const act of actividades) {
+      if (act.estado === "cerrado" || !act.fechaCierre) continue;
+
+      if (act.fechaCierre < hoy) {
+        act.estadoCaso = "vencido";
+      }
+    }
+
+    res.json(actividades);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /* ================= CREAR ACTIVIDAD ================= */
 
 app.post('/actividades', auth, async (req, res) => {
-  console.log("✏️ POST /actividades - User:", req.user.nombre);
+  try {
+    console.log("\n✏️ POST /actividades - User:", req.user.nombre);
 
-  const { tipificacion, actividadCatalogo } = req.body;
+    const { tipificacion, actividadCatalogo } = req.body;
 
-  const cat = await Catalogo.findOne({
-    tipificacion,
-    actividad: actividadCatalogo
-  });
+    const cat = await Catalogo.findOne({
+      tipificacion,
+      actividad: actividadCatalogo
+    });
 
-  if (!cat) {
-    return res.status(400).json({ error: "Actividad no existe en catálogo" });
+    if (!cat) {
+      return res.status(400).json({ error: "Actividad no existe en catálogo" });
+    }
+
+    const fechaCreacion = new Date();
+    const fechaCierre = sumarDiasHabiles(fechaCreacion, cat.diasHabiles);
+
+    const nueva = await Actividad.create({
+      ...req.body,
+      lider: req.user.nombre,
+      fechaCreacion,
+      fechaCierre
+    });
+
+    console.log("  ✅ Actividad creada:", nueva._id);
+
+    res.status(201).json(nueva);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
   }
-
-  const fechaCreacion = new Date();
-  const fechaCierre = sumarDiasHabiles(fechaCreacion, cat.diasHabiles);
-
-  const nueva = await Actividad.create({
-    ...req.body,
-    lider: req.user.nombre,
-    fechaCreacion,
-    fechaCierre
-  });
-
-  res.status(201).json(nueva);
 });
 
-/* ================= AGREGAR OBSERVACIÓN ================= */
+/* ================= OBSERVACIONES ================= */
 
-// ✅ CORREGIDO - Usar /observaciones (plural)
 app.post('/actividades/:id/observaciones', auth, async (req, res) => {
-  console.log("📝 POST /actividades/:id/observaciones - User:", req.user.nombre);
+  try {
+    console.log("\n📝 POST /actividades/:id/observaciones - User:", req.user.nombre);
 
-  const { comentario, horas } = req.body;
+    const { comentario, horas } = req.body;
 
-  const actividad = await Actividad.findById(req.params.id);
+    const actividad = await Actividad.findById(req.params.id);
 
-  if (!actividad) {
-    return res.status(404).json({ error: "Actividad no encontrada" });
+    if (!actividad) {
+      return res.status(404).json({ error: "Actividad no encontrada" });
+    }
+
+    actividad.observaciones.push({ comentario, fecha: new Date() });
+
+    if (horas) {
+      actividad.horasAcumuladas += horas;
+    }
+
+    await actividad.save();
+
+    console.log("  ✅ Observación agregada");
+
+    res.json(actividad);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
   }
-
-  actividad.observaciones.push({ comentario, fecha: new Date() });
-
-  if (horas) {
-    actividad.horasAcumuladas += horas;
-  }
-
-  await actividad.save();
-
-  res.json(actividad);
 });
 
 /* ================= CERRAR ACTIVIDAD ================= */
 
-// ✅ CORREGIDO - Aceptar tanto PUT como POST
 app.put('/actividades/:id/cerrar', auth, async (req, res) => {
-  console.log("🔒 PUT /actividades/:id/cerrar - User:", req.user.nombre);
+  try {
+    console.log("\n🔒 PUT /actividades/:id/cerrar - User:", req.user.nombre);
 
-  const actividad = await Actividad.findById(req.params.id);
+    const actividad = await Actividad.findById(req.params.id);
 
-  if (!actividad) {
-    return res.status(404).json({ error: "Actividad no encontrada" });
+    if (!actividad) {
+      return res.status(404).json({ error: "Actividad no encontrada" });
+    }
+
+    actividad.estado = "cerrado";
+    await actividad.save();
+
+    console.log("  ✅ Actividad cerrada");
+
+    res.json(actividad);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
   }
-
-  actividad.estado = "cerrado";
-  await actividad.save();
-
-  res.json(actividad);
 });
 
-// Mantener POST también por compatibilidad
 app.post('/actividades/:id/cerrar', auth, async (req, res) => {
-  console.log("🔒 POST /actividades/:id/cerrar - User:", req.user.nombre);
+  try {
+    console.log("\n🔒 POST /actividades/:id/cerrar - User:", req.user.nombre);
 
-  const actividad = await Actividad.findById(req.params.id);
+    const actividad = await Actividad.findById(req.params.id);
 
-  if (!actividad) {
-    return res.status(404).json({ error: "Actividad no encontrada" });
+    if (!actividad) {
+      return res.status(404).json({ error: "Actividad no encontrada" });
+    }
+
+    actividad.estado = "cerrado";
+    await actividad.save();
+
+    console.log("  ✅ Actividad cerrada");
+
+    res.json(actividad);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
   }
-
-  actividad.estado = "cerrado";
-  await actividad.save();
-
-  res.json(actividad);
 });
 
 /* ================= UTILS ================= */
@@ -287,8 +332,15 @@ app.get('/', (req, res) => {
   res.send('API Infra funcionando 🚀');
 });
 
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', secret: SECRET });
+});
+
+/* ================= SERVER ================= */
+
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
-  console.log("🚀 Server running on port", port);
+  console.log("\n🚀 Server running on port", port);
   console.log("🔐 JWT_SECRET:", SECRET);
+  console.log("📊 MONGO_URI:", process.env.MONGO_URI ? "✅ Configurado" : "❌ NO Configurado");
 });
