@@ -178,6 +178,7 @@ app.get('/actividades', auth, async (req, res) => {
       if (act.fechaCierre < hoy) {
         act.estadoCaso = "vencido";
       }
+      // ✅ NO HAGAS SAVE() aquí, solo lectura
     }
 
     res.json(actividades);
