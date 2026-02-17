@@ -35,7 +35,7 @@ const userSchema = new mongoose.Schema({
   nombre: String,
   email: String,
   password: String,
-  rol: String
+  rol: String  // 'lider' | 'senior' | 'coordinador' | 'administrador'
 });
 
 const User = mongoose.model('User', userSchema, 'users');
