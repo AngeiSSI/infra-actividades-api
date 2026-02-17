@@ -274,14 +274,27 @@ app.put('/actividades/:id/cerrar', auth, async (req, res) => {
       return res.status(404).json({ error: "Actividad no encontrada" });
     }
 
+    // ✅ Verificar que haya observación del día de hoy
+    const hoy = new Date();
+    const hoyString = hoy.toISOString().split('T')[0];
+
+    const tieneObservacionHoy = actividad.observaciones?.some(obs => {
+      const fechaObs = new Date(obs.fecha).toISOString().split('T')[0];
+      return fechaObs === hoyString;
+    });
+
+    if (!tieneObservacionHoy) {
+      return res.status(400).json({ error: "No se puede cerrar sin observación del día de hoy" });
+    }
+
     actividad.estado = "cerrado";
-    // ✅ NUEVO: Actualizar fechaModificacion al cerrar
-    actividad.fechaModificacion = new Date();
+    // ❌ NO actualizar fechaModificacion al cerrar
+    // La fecha de modificación es la fecha de cierre que ya fue asignada
 
     await actividad.save();
 
     console.log("  ✅ Actividad cerrada");
-    console.log("  📅 fechaModificacion actualizada:", actividad.fechaModificacion);
+    console.log("  📅 Estado actualizado a: cerrado");
 
     res.json(actividad);
   } catch (err) {
@@ -302,14 +315,26 @@ app.post('/actividades/:id/cerrar', auth, async (req, res) => {
       return res.status(404).json({ error: "Actividad no encontrada" });
     }
 
+    // ✅ Verificar que haya observación del día de hoy
+    const hoy = new Date();
+    const hoyString = hoy.toISOString().split('T')[0];
+
+    const tieneObservacionHoy = actividad.observaciones?.some(obs => {
+      const fechaObs = new Date(obs.fecha).toISOString().split('T')[0];
+      return fechaObs === hoyString;
+    });
+
+    if (!tieneObservacionHoy) {
+      return res.status(400).json({ error: "No se puede cerrar sin observación del día de hoy" });
+    }
+
     actividad.estado = "cerrado";
-    // ✅ NUEVO: Actualizar fechaModificacion al cerrar
-    actividad.fechaModificacion = new Date();
+    // ❌ NO actualizar fechaModificacion al cerrar
 
     await actividad.save();
 
     console.log("  ✅ Actividad cerrada");
-    console.log("  📅 fechaModificacion actualizada:", actividad.fechaModificacion);
+    console.log("  📅 Estado actualizado a: cerrado");
 
     res.json(actividad);
   } catch (err) {
