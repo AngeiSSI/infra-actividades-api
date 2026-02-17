@@ -35,7 +35,9 @@ const userSchema = new mongoose.Schema({
   nombre: String,
   email: String,
   password: String,
-  rol: String  // 'lider' | 'senior' | 'coordinador' | 'administrador'
+  rol: String,  // 'lider' | 'senior' | 'coordinador' | 'administrador'
+  activo: { type: Boolean, default: true },
+  fechaCreacion: { type: Date, default: Date.now }
 });
 
 const User = mongoose.model('User', userSchema, 'users');
@@ -69,6 +71,17 @@ const actividadSchema = new mongoose.Schema({
 
 const Actividad = mongoose.model('Actividad', actividadSchema, 'actividades');
 
+// ✅ NUEVO: Modelo de Accesos
+const accesoSchema = new mongoose.Schema({
+  usuarioId: mongoose.Schema.Types.ObjectId,
+  modulo: String,  // 'actividades', 'control-accesos', etc
+  permiso: String,  // 'ver', 'crear', 'editar', 'eliminar', 'cerrar'
+  activo: { type: Boolean, default: true },
+  fechaCreacion: { type: Date, default: Date.now }
+});
+
+const Acceso = mongoose.model('Acceso', accesoSchema, 'accesos');
+
 /* ================= AUTH MIDDLEWARE ================= */
 
 function auth(req, res, next) {
@@ -96,6 +109,14 @@ function auth(req, res, next) {
     console.log("  ❌ Error validando token:", err.message);
     return res.status(401).json({ error: "Token inválido: " + err.message });
   }
+}
+
+// ✅ NUEVO: Middleware para verificar que sea Coordinador o Administrador
+function esCoordinadorOAdmin(req, res, next) {
+  if (req.user.rol !== 'coordinador' && req.user.rol !== 'administrador') {
+    return res.status(403).json({ error: "Acceso denegado - requiere permisos de Coordinador o Administrador" });
+  }
+  next();
 }
 
 /* ================= LOGIN ================= */
@@ -154,6 +175,156 @@ app.get('/catalogo', auth, async (req, res) => {
   }
 });
 
+/* ================= USUARIOS - GET ================= */
+
+app.get('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n👥 GET /usuarios - User:", req.user.nombre);
+    
+    const usuarios = await User.find({ activo: true }).select('-password');
+    
+    console.log("  ✅ Usuarios enviados:", usuarios.length);
+    res.json(usuarios);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= USUARIOS - POST (Crear) ================= */
+
+app.post('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n👤 POST /usuarios - User:", req.user.nombre);
+
+    const { nombre, email, password, rol } = req.body;
+
+    // Verificar que el email no exista
+    const existente = await User.findOne({ email });
+    if (existente) {
+      return res.status(400).json({ error: "El email ya existe" });
+    }
+
+    const nuevoUsuario = await User.create({
+      nombre,
+      email,
+      password,
+      rol,
+      activo: true
+    });
+
+    console.log("  ✅ Usuario creado:", nuevoUsuario._id);
+    
+    res.status(201).json(nuevoUsuario);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= USUARIOS - PUT (Actualizar) ================= */
+
+app.put('/usuarios/:id', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n✏️ PUT /usuarios/:id - User:", req.user.nombre);
+
+    const { nombre, email, rol, activo } = req.body;
+
+    const usuario = await User.findByIdAndUpdate(
+      req.params.id,
+      { nombre, email, rol, activo },
+      { new: true }
+    ).select('-password');
+
+    if (!usuario) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    console.log("  ✅ Usuario actualizado:", usuario._id);
+    res.json(usuario);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= USUARIOS - DELETE ================= */
+
+app.delete('/usuarios/:id', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n🗑️ DELETE /usuarios/:id - User:", req.user.nombre);
+
+    const usuario = await User.findByIdAndUpdate(
+      req.params.id,
+      { activo: false },
+      { new: true }
+    );
+
+    if (!usuario) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    console.log("  ✅ Usuario eliminado (desactivado):", usuario._id);
+    res.json({ mensaje: "Usuario eliminado correctamente" });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= ACCESOS - GET ================= */
+
+app.get('/accesos', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n🔐 GET /accesos - User:", req.user.nombre);
+
+    const { usuarioId } = req.query;
+    let filtro = { activo: true };
+
+    if (usuarioId) {
+      filtro.usuarioId = usuarioId;
+    }
+
+    const accesos = await Acceso.find(filtro);
+
+    console.log("  ✅ Accesos enviados:", accesos.length);
+    res.json(accesos);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= ACCESOS - POST (Actualizar accesos de usuario) ================= */
+
+app.post('/usuarios/:id/accesos', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n🔐 POST /usuarios/:id/accesos - User:", req.user.nombre);
+
+    const { accesos } = req.body;
+    const usuarioId = req.params.id;
+
+    // Eliminar accesos anteriores del usuario
+    await Acceso.deleteMany({ usuarioId });
+
+    // Crear nuevos accesos
+    const nuevosAccesos = accesos.map(a => ({
+      usuarioId,
+      modulo: a.modulo,
+      permiso: a.permiso,
+      activo: a.activo
+    }));
+
+    const resultado = await Acceso.insertMany(nuevosAccesos);
+
+    console.log("  ✅ Accesos actualizados:", resultado.length);
+    res.json(resultado);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* ================= ACTIVIDADES - GET ================= */
 
 app.get('/actividades', auth, async (req, res) => {
@@ -162,6 +333,8 @@ app.get('/actividades', auth, async (req, res) => {
 
     let filtro = {};
 
+    // ✅ Actualizado: Ahora solo 'lider' ve sus actividades
+    // 'senior' y 'coordinador' ven todas
     if (req.user.rol === 'lider') {
       filtro.lider = req.user.nombre;
     }
@@ -178,7 +351,6 @@ app.get('/actividades', auth, async (req, res) => {
       if (act.fechaCierre < hoy) {
         act.estadoCaso = "vencido";
       }
-      // ✅ NO HAGAS SAVE() aquí, solo lectura
     }
 
     res.json(actividades);
@@ -208,12 +380,11 @@ app.post('/actividades', auth, async (req, res) => {
     const fechaCreacion = new Date();
     const fechaCierre = sumarDiasHabiles(fechaCreacion, cat.diasHabiles);
 
-    // ✅ NUEVO: Incluir fechaModificacion al crear
     const nueva = await Actividad.create({
       ...req.body,
       lider: req.user.nombre,
       fechaCreacion,
-      fechaModificacion: fechaCreacion,  // ✅ Se asigna automáticamente
+      fechaModificacion: fechaCreacion,
       fechaCierre
     });
 
@@ -247,7 +418,6 @@ app.post('/actividades/:id/observaciones', auth, async (req, res) => {
       actividad.horasAcumuladas += horas;
     }
 
-    // ✅ IMPORTANTE: Actualizar fechaModificacion
     actividad.fechaModificacion = new Date();
 
     await actividad.save();
@@ -274,7 +444,6 @@ app.put('/actividades/:id/cerrar', auth, async (req, res) => {
       return res.status(404).json({ error: "Actividad no encontrada" });
     }
 
-    // ✅ Verificar que haya observación del día de hoy
     const hoy = new Date();
     const hoyString = hoy.toISOString().split('T')[0];
 
@@ -288,8 +457,6 @@ app.put('/actividades/:id/cerrar', auth, async (req, res) => {
     }
 
     actividad.estado = "cerrado";
-    // ❌ NO actualizar fechaModificacion al cerrar
-    // La fecha de modificación es la fecha de cierre que ya fue asignada
 
     await actividad.save();
 
@@ -315,7 +482,6 @@ app.post('/actividades/:id/cerrar', auth, async (req, res) => {
       return res.status(404).json({ error: "Actividad no encontrada" });
     }
 
-    // ✅ Verificar que haya observación del día de hoy
     const hoy = new Date();
     const hoyString = hoy.toISOString().split('T')[0];
 
@@ -329,7 +495,6 @@ app.post('/actividades/:id/cerrar', auth, async (req, res) => {
     }
 
     actividad.estado = "cerrado";
-    // ❌ NO actualizar fechaModificacion al cerrar
 
     await actividad.save();
 
