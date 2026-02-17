@@ -246,7 +246,7 @@ app.post('/actividades/:id/observaciones', auth, async (req, res) => {
       actividad.horasAcumuladas += horas;
     }
 
-    // ✅ NUEVO: Actualizar fechaModificacion al agregar observación
+    // ✅ IMPORTANTE: Actualizar fechaModificacion
     actividad.fechaModificacion = new Date();
 
     await actividad.save();
