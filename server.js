@@ -55,6 +55,7 @@ const actividadSchema = new mongoose.Schema({
   actividadCatalogo: String,
   descripcion: String,
   fechaCreacion: { type: Date, default: Date.now },
+  fechaModificacion: { type: Date, default: Date.now, required: true },
   fechaCierre: Date,
   estado: { type: String, default: "en progreso" },
   estadoCaso: { type: String, default: "no aplica" },
@@ -206,14 +207,17 @@ app.post('/actividades', auth, async (req, res) => {
     const fechaCreacion = new Date();
     const fechaCierre = sumarDiasHabiles(fechaCreacion, cat.diasHabiles);
 
+    // ✅ NUEVO: Incluir fechaModificacion al crear
     const nueva = await Actividad.create({
       ...req.body,
       lider: req.user.nombre,
       fechaCreacion,
+      fechaModificacion: fechaCreacion,  // ✅ Se asigna automáticamente
       fechaCierre
     });
 
     console.log("  ✅ Actividad creada:", nueva._id);
+    console.log("  📅 fechaModificacion asignada:", nueva.fechaModificacion);
 
     res.status(201).json(nueva);
   } catch (err) {
@@ -242,9 +246,13 @@ app.post('/actividades/:id/observaciones', auth, async (req, res) => {
       actividad.horasAcumuladas += horas;
     }
 
+    // ✅ NUEVO: Actualizar fechaModificacion al agregar observación
+    actividad.fechaModificacion = new Date();
+
     await actividad.save();
 
     console.log("  ✅ Observación agregada");
+    console.log("  📅 fechaModificacion actualizada:", actividad.fechaModificacion);
 
     res.json(actividad);
   } catch (err) {
@@ -253,7 +261,7 @@ app.post('/actividades/:id/observaciones', auth, async (req, res) => {
   }
 });
 
-/* ================= CERRAR ACTIVIDAD ================= */
+/* ================= CERRAR ACTIVIDAD (PUT) ================= */
 
 app.put('/actividades/:id/cerrar', auth, async (req, res) => {
   try {
@@ -266,9 +274,13 @@ app.put('/actividades/:id/cerrar', auth, async (req, res) => {
     }
 
     actividad.estado = "cerrado";
+    // ✅ NUEVO: Actualizar fechaModificacion al cerrar
+    actividad.fechaModificacion = new Date();
+
     await actividad.save();
 
     console.log("  ✅ Actividad cerrada");
+    console.log("  📅 fechaModificacion actualizada:", actividad.fechaModificacion);
 
     res.json(actividad);
   } catch (err) {
@@ -276,6 +288,8 @@ app.put('/actividades/:id/cerrar', auth, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+/* ================= CERRAR ACTIVIDAD (POST) ================= */
 
 app.post('/actividades/:id/cerrar', auth, async (req, res) => {
   try {
@@ -288,9 +302,13 @@ app.post('/actividades/:id/cerrar', auth, async (req, res) => {
     }
 
     actividad.estado = "cerrado";
+    // ✅ NUEVO: Actualizar fechaModificacion al cerrar
+    actividad.fechaModificacion = new Date();
+
     await actividad.save();
 
     console.log("  ✅ Actividad cerrada");
+    console.log("  📅 fechaModificacion actualizada:", actividad.fechaModificacion);
 
     res.json(actividad);
   } catch (err) {
