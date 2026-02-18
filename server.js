@@ -201,6 +201,28 @@ app.post('/cambiar-password-primera-vez', auth, async (req, res) => {
   }
 });
 
+/* ================= ADMIN - ACTUALIZAR TODOS LOS USUARIOS ================= */
+
+app.post('/admin/actualizar-usuarios-primera-vez', async (req, res) => {
+  try {
+    console.log("\n🔧 POST /admin/actualizar-usuarios-primera-vez");
+    
+    const resultado = await User.updateMany(
+      { primeraVez: { $exists: false } },  // Usuarios SIN el campo primeraVez
+      { $set: { primeraVez: true } }
+    );
+
+    console.log("  ✅ Usuarios actualizados:", resultado.modifiedCount);
+    res.json({ 
+      mensaje: "Usuarios actualizados", 
+      actualizados: resultado.modifiedCount 
+    });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* ================= CATALOGO ================= */
 
 app.get('/catalogo', auth, async (req, res) => {
