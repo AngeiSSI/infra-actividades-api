@@ -30,14 +30,14 @@ mongoose.connect(process.env.MONGO_URI)
   });
 
 /* ================= MODELOS ================= */
-
 const userSchema = new mongoose.Schema({
   nombre: String,
   email: String,
   password: String,
   rol: String,  // 'lider' | 'senior' | 'coordinador' | 'administrador'
-  grupo: String,  // ✅ CAMPO PARA GRUPO
+  grupo: String,
   activo: { type: Boolean, default: true },
+  primeraVez: { type: Boolean, default: true },  // ✅ NUEVO CAMPO
   fechaCreacion: { type: Date, default: Date.now }
 });
 
@@ -122,7 +122,6 @@ function esCoordinadorOAdmin(req, res, next) {
 }
 
 /* ================= LOGIN ================= */
-
 app.post('/login', async (req, res) => {
   console.log("\n🔓 POST /login");
   console.log("  Body recibido:", req.body);
@@ -154,11 +153,43 @@ app.post('/login', async (req, res) => {
       token,
       usuario: {
         nombre: user.nombre,
-        rol: user.rol
+        rol: user.rol,
+        primeraVez: user.primeraVez  // ✅ ENVIAR ESTE CAMPO
       }
     });
   } catch (err) {
     console.error("  ❌ Error en login:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= CAMBIAR CONTRASEÑA (Primera Vez) ================= */
+
+app.post('/cambiar-password-primera-vez', auth, async (req, res) => {
+  try {
+    console.log("\n🔐 POST /cambiar-password-primera-vez - User:", req.user.nombre);
+    console.log("  📤 Datos recibidos:", { nueva_password: '***' });
+
+    const { nueva_password } = req.body;
+
+    if (!nueva_password || nueva_password.length < 6) {
+      return res.status(400).json({ error: "La contraseña debe tener mínimo 6 caracteres" });
+    }
+
+    const usuario = await User.findByIdAndUpdate(
+      req.user.id,
+      { password: nueva_password, primeraVez: false },
+      { new: true, runValidators: false }
+    ).select('-password');
+
+    if (!usuario) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    console.log("  ✅ Contraseña actualizada:", usuario._id);
+    res.json({ mensaje: "Contraseña cambiada correctamente", usuario });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -219,11 +250,12 @@ app.post('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
       password,
       rol,
       grupo,  // ✅ GUARDAR GRUPO
-      activo: true
+      activo: true,
+      primeraVez: true  // ✅ NUEVO: Marcar como primera vez
     });
 
     console.log("  ✅ Usuario creado:", nuevoUsuario._id);
-    console.log("  📋 Datos guardados:", { nombre, email, rol, grupo });
+    console.log("  📋 Datos guardados:", { nombre, email, rol, grupo, primeraVez: true });
     
     res.status(201).json(nuevoUsuario);
   } catch (err) {
