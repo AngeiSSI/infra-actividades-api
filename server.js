@@ -140,6 +140,8 @@ app.post('/login', async (req, res) => {
     }
 
     console.log("  ✅ Usuario encontrado:", user.nombre);
+    console.log("  🔐 primeraVez en BD:", user.primeraVez);  // ✅ LOG DE DEBUG
+    console.log("  📋 Usuario completo:", JSON.stringify(user, null, 2));  // ✅ LOG DE DEBUG
 
     const token = jwt.sign(
       { id: user._id, nombre: user.nombre, rol: user.rol },
@@ -149,14 +151,18 @@ app.post('/login', async (req, res) => {
 
     console.log("  ✅ Token generado:", token.substring(0, 50) + "...");
 
-    res.json({
+    const respuesta = {
       token,
       usuario: {
         nombre: user.nombre,
         rol: user.rol,
         primeraVez: user.primeraVez  // ✅ ENVIAR ESTE CAMPO
       }
-    });
+    };
+
+    console.log("  📤 Respuesta de login:", JSON.stringify(respuesta, null, 2));  // ✅ LOG DE DEBUG
+    
+    res.json(respuesta);
   } catch (err) {
     console.error("  ❌ Error en login:", err.message);
     res.status(500).json({ error: err.message });
@@ -187,6 +193,7 @@ app.post('/cambiar-password-primera-vez', auth, async (req, res) => {
     }
 
     console.log("  ✅ Contraseña actualizada:", usuario._id);
+    console.log("  🔐 primeraVez actualizado a:", usuario.primeraVez);  // ✅ LOG DE DEBUG
     res.json({ mensaje: "Contraseña cambiada correctamente", usuario });
   } catch (err) {
     console.error("  ❌ Error:", err.message);
@@ -255,6 +262,7 @@ app.post('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
     });
 
     console.log("  ✅ Usuario creado:", nuevoUsuario._id);
+    console.log("  🔐 primeraVez:", nuevoUsuario.primeraVez);  // ✅ LOG DE DEBUG
     console.log("  📋 Datos guardados:", { nombre, email, rol, grupo, primeraVez: true });
     
     res.status(201).json(nuevoUsuario);
