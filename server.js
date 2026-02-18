@@ -212,6 +212,141 @@ app.post('/cambiar-password-primera-vez', auth, async (req, res) => {
   }
 });
 
+/* ================= RECUPERAR CONTRASEÑA (ENVIAR EMAIL) ================= */
+
+app.post('/recuperar-password', async (req, res) => {
+  try {
+    console.log("\n🔐 POST /recuperar-password");
+    console.log("  📤 Datos recibidos:", { email: req.body.email });
+
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: "Email requerido" });
+    }
+
+    const usuario = await User.findOne({ email });
+
+    if (!usuario) {
+      // ✅ No revelar si el email existe o no (por seguridad)
+      return res.json({ 
+        mensaje: "Si el email existe, recibirá instrucciones para resetear su contraseña" 
+      });
+    }
+
+    console.log("  ✅ Usuario encontrado:", usuario.nombre);
+    console.log("  📧 Email:", usuario.email);
+
+    // ✅ Generar token temporal para resetear contraseña
+    const tokenReset = jwt.sign(
+      { id: usuario._id, email: usuario.email },
+      SECRET,
+      { expiresIn: '1h' }  // Token válido por 1 hora
+    );
+
+    console.log("  🔐 Token de reset generado:", tokenReset.substring(0, 50) + "...");
+
+    // ✅ TODO: Aquí iría el envío de email con el token
+    // Por ahora devolvemos el token para testing
+    // En producción, enviarías un email con un enlace como:
+    // https://tudominio.com/resetear-password?token=TOKEN
+
+    res.json({ 
+      mensaje: "Instrucciones enviadas al email",
+      tokenReset  // ✅ SOLO PARA TESTING - En producción NO incluir esto
+    });
+
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= RESETEAR CONTRASEÑA (CON TOKEN) ================= */
+
+app.post('/resetear-password', async (req, res) => {
+  try {
+    console.log("\n🔐 POST /resetear-password");
+
+    const { token, nueva_password } = req.body;
+
+    if (!token || !nueva_password) {
+      return res.status(400).json({ error: "Token y contraseña requeridos" });
+    }
+
+    if (nueva_password.length < 6) {
+      return res.status(400).json({ error: "La contraseña debe tener mínimo 6 caracteres" });
+    }
+
+    // ✅ Validar el token
+    let decoded;
+    try {
+      decoded = jwt.verify(token, SECRET);
+      console.log("  ✅ Token válido para usuario:", decoded.email);
+    } catch (err) {
+      return res.status(401).json({ error: "Token inválido o expirado" });
+    }
+
+    // ✅ Actualizar contraseña
+    const usuario = await User.findByIdAndUpdate(
+      decoded.id,
+      { password: nueva_password, primeraVez: false },
+      { new: true, runValidators: false }
+    ).select('-password');
+
+    if (!usuario) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    console.log("  ✅ Contraseña reseteada para:", usuario.nombre);
+    res.json({ 
+      mensaje: "Contraseña reseteada correctamente",
+      usuario 
+    });
+
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= RESETEAR CONTRASEÑA (COORDINADOR/ADMIN) ================= */
+
+app.put('/usuarios/:id/resetear-password', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n🔐 PUT /usuarios/:id/resetear-password - User:", req.user.nombre);
+
+    const { nueva_password } = req.body;
+
+    if (!nueva_password || nueva_password.length < 6) {
+      return res.status(400).json({ error: "La contraseña debe tener mínimo 6 caracteres" });
+    }
+
+    const usuario = await User.findByIdAndUpdate(
+      req.params.id,
+      { password: nueva_password, primeraVez: true },  // ✅ Marcar para cambiar en próximo login
+      { new: true, runValidators: false }
+    ).select('-password');
+
+    if (!usuario) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    console.log("  ✅ Contraseña reseteada por:", req.user.nombre);
+    console.log("  👤 Usuario afectado:", usuario.nombre);
+    console.log("  🔐 primeraVez marcado como true");
+
+    res.json({ 
+      mensaje: "Contraseña reseteada correctamente",
+      usuario 
+    });
+
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* ================= ADMIN - ACTUALIZAR TODOS LOS USUARIOS ================= */
 
 app.post('/admin/actualizar-usuarios-primera-vez', async (req, res) => {
