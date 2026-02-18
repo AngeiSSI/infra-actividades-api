@@ -40,7 +40,7 @@ const userSchema = new mongoose.Schema({
   fechaCreacion: { type: Date, default: Date.now }
 });
 
-const User = mongoose.model('User', userSchema, 'users');
+const User = mongoose.model('User', userSchema, 'users');  // ✅ Colección 'users'
 
 const catalogoSchema = new mongoose.Schema({
   tipificacion: String,
@@ -71,7 +71,7 @@ const actividadSchema = new mongoose.Schema({
 
 const Actividad = mongoose.model('Actividad', actividadSchema, 'actividades');
 
-// ✅ NUEVO: Modelo de Accesos
+// ✅ Modelo de Accesos
 const accesoSchema = new mongoose.Schema({
   usuarioId: mongoose.Schema.Types.ObjectId,
   modulo: String,  // 'actividades', 'control-accesos', etc
@@ -111,9 +111,10 @@ function auth(req, res, next) {
   }
 }
 
-// ✅ NUEVO: Middleware para verificar que sea Coordinador o Administrador
+// ✅ Middleware para verificar que sea Coordinador o Administrador
 function esCoordinadorOAdmin(req, res, next) {
-  if (req.user.rol !== 'coordinador' && req.user.rol !== 'administrador') {
+  const rol = req.user?.rol?.toLowerCase();
+  if (rol !== 'coordinador' && rol !== 'administrador') {
     return res.status(403).json({ error: "Acceso denegado - requiere permisos de Coordinador o Administrador" });
   }
   next();
@@ -333,9 +334,8 @@ app.get('/actividades', auth, async (req, res) => {
 
     let filtro = {};
 
-    // ✅ Actualizado: Ahora solo 'lider' ve sus actividades
-    // 'senior' y 'coordinador' ven todas
-    if (req.user.rol === 'lider') {
+    const rol = req.user.rol?.toLowerCase();
+    if (rol === 'lider') {
       filtro.lider = req.user.nombre;
     }
 
