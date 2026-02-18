@@ -34,10 +34,10 @@ const userSchema = new mongoose.Schema({
   nombre: String,
   email: String,
   password: String,
-  rol: String,  // 'lider' | 'senior' | 'coordinador' | 'administrador'
+  rol: String,
   grupo: String,
   activo: { type: Boolean, default: true },
-  primeraVez: { type: Boolean, default: true },  // ✅ NUEVO CAMPO
+  primeraVez: { type: Boolean, default: true },
   fechaCreacion: { type: Date, default: Date.now }
 });
 
@@ -49,11 +49,11 @@ const catalogoSchema = new mongoose.Schema({
   actividad: String,
   diasHabiles: Number,
   estado: { type: String, enum: ['oficial', 'pendiente'], default: 'oficial' },
-  sugeridoPor: String,     // ✅ Quién sugirió
-  rolSugeridor: String,    // ✅ Rol de quien sugirió
+  sugeridoPor: String,
+  rolSugeridor: String,
   fechaSugerencia: { type: Date, default: Date.now },
   fechaCreacion: { type: Date, default: Date.now },
-  observaciones: String,   // ✅ Observaciones al rechazar
+  observaciones: String,
   activo: { type: Boolean, default: true }
 });
 
@@ -75,18 +75,17 @@ const actividadSchema = new mongoose.Schema({
   observaciones: [{
     fecha: { type: Date, default: Date.now },
     comentario: String,
-    usuario: String,  // ✅ NUEVO: Quién hizo la observación
-    rol: String      // ✅ NUEVO: Rol del usuario
+    usuario: String,
+    rol: String
   }]
 });
 
 const Actividad = mongoose.model('Actividad', actividadSchema, 'actividades');
 
-// ✅ Modelo de Accesos
 const accesoSchema = new mongoose.Schema({
   usuarioId: mongoose.Schema.Types.ObjectId,
-  modulo: String,  // 'actividades', 'control-accesos', etc
-  permiso: String,  // 'ver', 'crear', 'editar', 'eliminar', 'cerrar'
+  modulo: String,
+  permiso: String,
   activo: { type: Boolean, default: true },
   fechaCreacion: { type: Date, default: Date.now }
 });
@@ -110,7 +109,6 @@ function auth(req, res, next) {
   const token = header.replace("Bearer ", "").replace("bearer ", "");
 
   console.log("  🔐 Token recibido:", token.substring(0, 30) + "...");
-  console.log("  🔐 SECRET usado para validar:", SECRET);
 
   try {
     const decoded = jwt.verify(token, SECRET);
@@ -123,7 +121,6 @@ function auth(req, res, next) {
   }
 }
 
-// ✅ Middleware para verificar que sea Coordinador o Administrador
 function esCoordinadorOAdmin(req, res, next) {
   const rol = req.user?.rol?.toLowerCase();
   if (rol !== 'coordinador' && rol !== 'administrador') {
@@ -146,13 +143,11 @@ app.post('/login', async (req, res) => {
 
     if (!user) {
       console.log("  ❌ Usuario NO encontrado");
-      console.log("  📊 Email buscado:", email);
       return res.status(401).json({ error: "Credenciales inválidas" });
     }
 
     console.log("  ✅ Usuario encontrado:", user.nombre);
     console.log("  🔐 primeraVez en BD:", user.primeraVez);
-    console.log("  📋 Usuario completo:", JSON.stringify(user, null, 2));
 
     const token = jwt.sign(
       { id: user._id, nombre: user.nombre, rol: user.rol },
@@ -228,7 +223,6 @@ app.post('/recuperar-password', async (req, res) => {
     const usuario = await User.findOne({ email });
 
     if (!usuario) {
-      // ✅ No revelar si el email existe o no (por seguridad)
       return res.json({ 
         mensaje: "Si el email existe, recibirá instrucciones para resetear su contraseña" 
       });
@@ -237,23 +231,17 @@ app.post('/recuperar-password', async (req, res) => {
     console.log("  ✅ Usuario encontrado:", usuario.nombre);
     console.log("  📧 Email:", usuario.email);
 
-    // ✅ Generar token temporal para resetear contraseña
     const tokenReset = jwt.sign(
       { id: usuario._id, email: usuario.email },
       SECRET,
-      { expiresIn: '1h' }  // Token válido por 1 hora
+      { expiresIn: '1h' }
     );
 
     console.log("  🔐 Token de reset generado:", tokenReset.substring(0, 50) + "...");
 
-    // ✅ TODO: Aquí iría el envío de email con el token
-    // Por ahora devolvemos el token para testing
-    // En producción, enviarías un email con un enlace como:
-    // https://tudominio.com/resetear-password?token=TOKEN
-
     res.json({ 
       mensaje: "Instrucciones enviadas al email",
-      tokenReset  // ✅ SOLO PARA TESTING - En producción NO incluir esto
+      tokenReset
     });
 
   } catch (err) {
@@ -278,7 +266,6 @@ app.post('/resetear-password', async (req, res) => {
       return res.status(400).json({ error: "La contraseña debe tener mínimo 6 caracteres" });
     }
 
-    // ✅ Validar el token
     let decoded;
     try {
       decoded = jwt.verify(token, SECRET);
@@ -287,7 +274,6 @@ app.post('/resetear-password', async (req, res) => {
       return res.status(401).json({ error: "Token inválido o expirado" });
     }
 
-    // ✅ Actualizar contraseña
     const usuario = await User.findByIdAndUpdate(
       decoded.id,
       { password: nueva_password, primeraVez: false },
@@ -324,7 +310,7 @@ app.put('/usuarios/:id/resetear-password', auth, esCoordinadorOAdmin, async (req
 
     const usuario = await User.findByIdAndUpdate(
       req.params.id,
-      { password: nueva_password, primeraVez: true },  // ✅ Marcar para cambiar en próximo login
+      { password: nueva_password, primeraVez: true },
       { new: true, runValidators: false }
     ).select('-password');
 
@@ -373,7 +359,6 @@ app.post('/admin/actualizar-usuarios-primera-vez', async (req, res) => {
 app.get('/catalogo', auth, async (req, res) => {
   try {
     console.log("\n📖 GET /catalogo - User:", req.user.nombre);
-    // ✅ SOLO mostrar catálogo oficial
     const lista = await Catalogo.find({ estado: 'oficial', activo: true });
     console.log("  ✅ Catálogo oficial enviado:", lista.length, "items");
     res.json(lista);
@@ -387,7 +372,6 @@ app.get('/catalogo', auth, async (req, res) => {
 app.get('/catalogo/todos', auth, esCoordinadorOAdmin, async (req, res) => {
   try {
     console.log("\n📖 GET /catalogo/todos - User:", req.user.nombre);
-    // ✅ SOLO coordinador y admin ven todo
     const lista = await Catalogo.find({ activo: true }).sort({ estado: -1, fechaSugerencia: -1 });
     console.log("  ✅ Catálogo completo enviado:", lista.length, "items");
     res.json(lista);
@@ -412,7 +396,6 @@ app.post('/catalogo', auth, async (req, res) => {
     const rol = req.user.rol?.toLowerCase();
     const esAutorizado = rol === 'coordinador' || rol === 'administrador';
 
-    // ✅ Si es coordinador o admin, crear oficial. Si no, crear pendiente
     const nuevoItem = await Catalogo.create({
       tipificacion,
       actividad,
