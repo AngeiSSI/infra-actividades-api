@@ -36,7 +36,7 @@ const userSchema = new mongoose.Schema({
   email: String,
   password: String,
   rol: String,  // 'lider' | 'senior' | 'coordinador' | 'administrador'
-  grupo: String,  // ✅ AGREGAR ESTE CAMPO
+  grupo: String,  // ✅ CAMPO PARA GRUPO
   activo: { type: Boolean, default: true },
   fechaCreacion: { type: Date, default: Date.now }
 });
@@ -193,7 +193,9 @@ app.get('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 /* ================= USUARIOS - POST (Crear) ================= */
+
 app.post('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
   try {
     console.log("\n👤 POST /usuarios - User:", req.user.nombre);
@@ -212,7 +214,7 @@ app.post('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
       email,
       password,
       rol,
-      grupo,  // ✅ AGREGAR ESTE CAMPO
+      grupo,  // ✅ GUARDAR GRUPO
       activo: true
     });
 
@@ -227,6 +229,7 @@ app.post('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
 });
 
 /* ================= USUARIOS - PUT (Actualizar) ================= */
+
 app.put('/usuarios/:id', auth, esCoordinadorOAdmin, async (req, res) => {
   try {
     console.log("\n✏️ PUT /usuarios/:id - User:", req.user.nombre);
@@ -236,8 +239,8 @@ app.put('/usuarios/:id', auth, esCoordinadorOAdmin, async (req, res) => {
 
     const usuario = await User.findByIdAndUpdate(
       req.params.id,
-      { nombre, email, rol, grupo, activo },  // ✅ AGREGAR grupo AQUÍ
-      { new: true }
+      { nombre, email, rol, grupo, activo },  // ✅ INCLUIR TODOS LOS CAMPOS
+      { new: true, runValidators: false }  // ✅ runValidators: false para evitar problemas
     ).select('-password');
 
     if (!usuario) {
@@ -245,7 +248,7 @@ app.put('/usuarios/:id', auth, esCoordinadorOAdmin, async (req, res) => {
     }
 
     console.log("  ✅ Usuario actualizado:", usuario._id);
-    console.log("  📋 Datos guardados:", { nombre, email, rol, grupo, activo });
+    console.log("  📋 Usuario actualizado:", { nombre, email, rol, grupo, activo });
     res.json(usuario);
   } catch (err) {
     console.error("  ❌ Error:", err.message);
