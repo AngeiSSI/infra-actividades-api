@@ -183,7 +183,8 @@ app.get('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
   try {
     console.log("\n👥 GET /usuarios - User:", req.user.nombre);
     
-    const usuarios = await User.find({ activo: true }).select('-password');
+    // ✅ Devolver TODOS los usuarios (activos e inactivos)
+    const usuarios = await User.find().select('-password');
     
     console.log("  ✅ Usuarios enviados:", usuarios.length);
     res.json(usuarios);
@@ -192,7 +193,6 @@ app.get('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 /* ================= USUARIOS - POST (Crear) ================= */
 app.post('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
   try {
