@@ -13,7 +13,7 @@ console.log("🔐 SECRET:", SECRET);
 /* ================= CORS ================= */
 app.use(cors({
   origin: "*",
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
@@ -41,12 +41,20 @@ const userSchema = new mongoose.Schema({
   fechaCreacion: { type: Date, default: Date.now }
 });
 
-const User = mongoose.model('User', userSchema, 'users');  // ✅ Colección 'users'
+const User = mongoose.model('User', userSchema, 'users');
 
+/* ================= MODELO CATÁLOGO CON SUGERENCIAS ================= */
 const catalogoSchema = new mongoose.Schema({
   tipificacion: String,
   actividad: String,
-  diasHabiles: Number
+  diasHabiles: Number,
+  estado: { type: String, enum: ['oficial', 'pendiente'], default: 'oficial' },
+  sugeridoPor: String,     // ✅ Quién sugirió
+  rolSugeridor: String,    // ✅ Rol de quien sugirió
+  fechaSugerencia: { type: Date, default: Date.now },
+  fechaCreacion: { type: Date, default: Date.now },
+  observaciones: String,   // ✅ Observaciones al rechazar
+  activo: { type: Boolean, default: true }
 });
 
 const Catalogo = mongoose.model('Catalogo', catalogoSchema, 'catalogos');
@@ -84,6 +92,7 @@ const accesoSchema = new mongoose.Schema({
 });
 
 const Acceso = mongoose.model('Acceso', accesoSchema, 'accesos');
+
 
 /* ================= AUTH MIDDLEWARE ================= */
 
@@ -142,8 +151,8 @@ app.post('/login', async (req, res) => {
     }
 
     console.log("  ✅ Usuario encontrado:", user.nombre);
-    console.log("  🔐 primeraVez en BD:", user.primeraVez);  // ✅ LOG DE DEBUG
-    console.log("  📋 Usuario completo:", JSON.stringify(user, null, 2));  // ✅ LOG DE DEBUG
+    console.log("  🔐 primeraVez en BD:", user.primeraVez);
+    console.log("  📋 Usuario completo:", JSON.stringify(user, null, 2));
 
     const token = jwt.sign(
       { id: user._id, nombre: user.nombre, rol: user.rol },
@@ -158,11 +167,11 @@ app.post('/login', async (req, res) => {
       usuario: {
         nombre: user.nombre,
         rol: user.rol,
-        primeraVez: user.primeraVez  // ✅ ENVIAR ESTE CAMPO
+        primeraVez: user.primeraVez
       }
     };
 
-    console.log("  📤 Respuesta de login:", JSON.stringify(respuesta, null, 2));  // ✅ LOG DE DEBUG
+    console.log("  📤 Respuesta de login:", JSON.stringify(respuesta, null, 2));
     
     res.json(respuesta);
   } catch (err) {
@@ -195,7 +204,7 @@ app.post('/cambiar-password-primera-vez', auth, async (req, res) => {
     }
 
     console.log("  ✅ Contraseña actualizada:", usuario._id);
-    console.log("  🔐 primeraVez actualizado a:", usuario.primeraVez);  // ✅ LOG DE DEBUG
+    console.log("  🔐 primeraVez actualizado a:", usuario.primeraVez);
     res.json({ mensaje: "Contraseña cambiada correctamente", usuario });
   } catch (err) {
     console.error("  ❌ Error:", err.message);
@@ -210,7 +219,7 @@ app.post('/admin/actualizar-usuarios-primera-vez', async (req, res) => {
     console.log("\n🔧 POST /admin/actualizar-usuarios-primera-vez");
     
     const resultado = await User.updateMany(
-      { primeraVez: { $exists: false } },  // Usuarios SIN el campo primeraVez
+      { primeraVez: { $exists: false } },
       { $set: { primeraVez: true } }
     );
 
@@ -225,14 +234,165 @@ app.post('/admin/actualizar-usuarios-primera-vez', async (req, res) => {
   }
 });
 
-/* ================= CATALOGO ================= */
-
+/* ================= CATÁLOGO - GET (SOLO OFICIAL) ================= */
 app.get('/catalogo', auth, async (req, res) => {
   try {
     console.log("\n📖 GET /catalogo - User:", req.user.nombre);
-    const lista = await Catalogo.find();
-    console.log("  ✅ Catálogo enviado:", lista.length, "items");
+    // ✅ SOLO mostrar catálogo oficial
+    const lista = await Catalogo.find({ estado: 'oficial', activo: true });
+    console.log("  ✅ Catálogo oficial enviado:", lista.length, "items");
     res.json(lista);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= CATÁLOGO - GET TODOS (INCLUYE PENDIENTES) ================= */
+app.get('/catalogo/todos', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n📖 GET /catalogo/todos - User:", req.user.nombre);
+    // ✅ SOLO coordinador y admin ven todo
+    const lista = await Catalogo.find({ activo: true }).sort({ estado: -1, fechaSugerencia: -1 });
+    console.log("  ✅ Catálogo completo enviado:", lista.length, "items");
+    res.json(lista);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= CATÁLOGO - POST (CREAR O SUGERIR) ================= */
+app.post('/catalogo', auth, async (req, res) => {
+  try {
+    console.log("\n➕ POST /catalogo - User:", req.user.nombre);
+    console.log("  📤 Datos recibidos:", req.body);
+
+    const { tipificacion, actividad, diasHabiles } = req.body;
+
+    if (!tipificacion || !actividad || !diasHabiles) {
+      return res.status(400).json({ error: "Faltan campos requeridos" });
+    }
+
+    const rol = req.user.rol?.toLowerCase();
+    const esAutorizado = rol === 'coordinador' || rol === 'administrador';
+
+    // ✅ Si es coordinador o admin, crear oficial. Si no, crear pendiente
+    const nuevoItem = await Catalogo.create({
+      tipificacion,
+      actividad,
+      diasHabiles,
+      estado: esAutorizado ? 'oficial' : 'pendiente',
+      sugeridoPor: req.user.nombre,
+      rolSugeridor: req.user.rol
+    });
+
+    console.log("  ✅ Catálogo creado:", nuevoItem._id);
+    console.log("  📋 Estado:", nuevoItem.estado);
+    console.log("  👤 Sugerido por:", req.user.nombre);
+
+    res.status(201).json(nuevoItem);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= CATÁLOGO - PUT (EDITAR - SOLO COORDINADOR/ADMIN) ================= */
+app.put('/catalogo/:id', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n✏️ PUT /catalogo/:id - User:", req.user.nombre);
+    console.log("  📤 Datos recibidos:", req.body);
+
+    const { tipificacion, actividad, diasHabiles } = req.body;
+
+    const item = await Catalogo.findByIdAndUpdate(
+      req.params.id,
+      { tipificacion, actividad, diasHabiles },
+      { new: true, runValidators: false }
+    );
+
+    if (!item) {
+      return res.status(404).json({ error: "Catálogo no encontrado" });
+    }
+
+    console.log("  ✅ Catálogo actualizado:", item._id);
+    res.json(item);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= CATÁLOGO - PATCH (APROBAR SUGERENCIA) ================= */
+app.patch('/catalogo/:id/aprobar', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n✅ PATCH /catalogo/:id/aprobar - User:", req.user.nombre);
+
+    const item = await Catalogo.findByIdAndUpdate(
+      req.params.id,
+      { estado: 'oficial' },
+      { new: true }
+    );
+
+    if (!item) {
+      return res.status(404).json({ error: "Catálogo no encontrado" });
+    }
+
+    console.log("  ✅ Sugerencia aprobada:", item._id);
+    console.log("  📋 Sugerencia de:", item.sugeridoPor);
+
+    res.json({ mensaje: "Sugerencia aprobada", item });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= CATÁLOGO - PATCH (RECHAZAR SUGERENCIA) ================= */
+app.patch('/catalogo/:id/rechazar', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n❌ PATCH /catalogo/:id/rechazar - User:", req.user.nombre);
+
+    const { observaciones } = req.body;
+
+    const item = await Catalogo.findByIdAndUpdate(
+      req.params.id,
+      { activo: false, observaciones },
+      { new: true }
+    );
+
+    if (!item) {
+      return res.status(404).json({ error: "Catálogo no encontrado" });
+    }
+
+    console.log("  ✅ Sugerencia rechazada:", item._id);
+    console.log("  📝 Observaciones:", observaciones);
+
+    res.json({ mensaje: "Sugerencia rechazada", item });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= CATÁLOGO - DELETE (DESACTIVAR - SOLO COORDINADOR/ADMIN) ================= */
+app.delete('/catalogo/:id', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n🗑️ DELETE /catalogo/:id - User:", req.user.nombre);
+
+    const item = await Catalogo.findByIdAndUpdate(
+      req.params.id,
+      { activo: false },
+      { new: true }
+    );
+
+    if (!item) {
+      return res.status(404).json({ error: "Catálogo no encontrado" });
+    }
+
+    console.log("  ✅ Catálogo eliminado (desactivado):", item._id);
+    res.json({ mensaje: "Catálogo eliminado correctamente" });
   } catch (err) {
     console.error("  ❌ Error:", err.message);
     res.status(500).json({ error: err.message });
@@ -244,7 +404,6 @@ app.get('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
   try {
     console.log("\n👥 GET /usuarios - User:", req.user.nombre);
     
-    // Debug: Contar todos los usuarios primero
     const total = await User.countDocuments();
     console.log("  📊 Total de usuarios en BD:", total);
     
@@ -269,7 +428,6 @@ app.post('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
 
     const { nombre, email, password, rol, grupo } = req.body;
 
-    // Verificar que el email no exista
     const existente = await User.findOne({ email });
     if (existente) {
       return res.status(400).json({ error: "El email ya existe" });
@@ -280,13 +438,13 @@ app.post('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
       email,
       password,
       rol,
-      grupo,  // ✅ GUARDAR GRUPO
+      grupo,
       activo: true,
-      primeraVez: true  // ✅ NUEVO: Marcar como primera vez
+      primeraVez: true
     });
 
     console.log("  ✅ Usuario creado:", nuevoUsuario._id);
-    console.log("  🔐 primeraVez:", nuevoUsuario.primeraVez);  // ✅ LOG DE DEBUG
+    console.log("  🔐 primeraVez:", nuevoUsuario.primeraVez);
     console.log("  📋 Datos guardados:", { nombre, email, rol, grupo, primeraVez: true });
     
     res.status(201).json(nuevoUsuario);
@@ -307,8 +465,8 @@ app.put('/usuarios/:id', auth, esCoordinadorOAdmin, async (req, res) => {
 
     const usuario = await User.findByIdAndUpdate(
       req.params.id,
-      { nombre, email, rol, grupo, activo },  // ✅ INCLUIR TODOS LOS CAMPOS
-      { new: true, runValidators: false }  // ✅ runValidators: false para evitar problemas
+      { nombre, email, rol, grupo, activo },
+      { new: true, runValidators: false }
     ).select('-password');
 
     if (!usuario) {
@@ -380,10 +538,8 @@ app.post('/usuarios/:id/accesos', auth, esCoordinadorOAdmin, async (req, res) =>
     const { accesos } = req.body;
     const usuarioId = req.params.id;
 
-    // Eliminar accesos anteriores del usuario
     await Acceso.deleteMany({ usuarioId });
 
-    // Crear nuevos accesos
     const nuevosAccesos = accesos.map(a => ({
       usuarioId,
       modulo: a.modulo,
@@ -445,11 +601,12 @@ app.post('/actividades', auth, async (req, res) => {
 
     const cat = await Catalogo.findOne({
       tipificacion,
-      actividad: actividadCatalogo
+      actividad: actividadCatalogo,
+      estado: 'oficial'
     });
 
     if (!cat) {
-      return res.status(400).json({ error: "Actividad no existe en catálogo" });
+      return res.status(400).json({ error: "Actividad no existe en catálogo oficial" });
     }
 
     const fechaCreacion = new Date();
@@ -477,9 +634,9 @@ app.post('/actividades', auth, async (req, res) => {
 app.post('/actividades/:id/observaciones', auth, async (req, res) => {
   try {
     console.log("\n📝 POST /actividades/:id/observaciones");
-    console.log("  🔐 req.user:", req.user);  // ✅ NUEVO LOG
-    console.log("  🔐 req.user.nombre:", req.user?.nombre);  // ✅ NUEVO LOG
-    console.log("  📤 Body recibido:", req.body);  // ✅ NUEVO LOG
+    console.log("  🔐 req.user:", req.user);
+    console.log("  🔐 req.user.nombre:", req.user?.nombre);
+    console.log("  📤 Body recibido:", req.body);
 
     const { comentario, horas } = req.body;
 
@@ -490,9 +647,8 @@ app.post('/actividades/:id/observaciones', auth, async (req, res) => {
     }
 
     console.log("  ✅ Actividad encontrada");
-    console.log("  📋 Usuario a guardar:", req.user.nombre);  // ✅ NUEVO LOG
+    console.log("  📋 Usuario a guardar:", req.user.nombre);
 
-    // ✅ GUARDAR USUARIO Y ROL EN LA OBSERVACIÓN
     actividad.observaciones.push({ 
       comentario, 
       fecha: new Date(),
@@ -500,7 +656,7 @@ app.post('/actividades/:id/observaciones', auth, async (req, res) => {
       rol: req.user.rol
     });
 
-    console.log("  ✅ Observación creada con usuario:", req.user.nombre);  // ✅ NUEVO LOG
+    console.log("  ✅ Observación creada con usuario:", req.user.nombre);
 
     if (horas) {
       actividad.horasAcumuladas += horas;
@@ -511,8 +667,8 @@ app.post('/actividades/:id/observaciones', auth, async (req, res) => {
     await actividad.save();
 
     console.log("  ✅ Actividad guardada");
-    console.log("  📋 Observaciones guardadas:", actividad.observaciones.length);  // ✅ NUEVO LOG
-    console.log("  📋 Última observación guardada:", actividad.observaciones[actividad.observaciones.length - 1]);  // ✅ NUEVO LOG
+    console.log("  📋 Observaciones guardadas:", actividad.observaciones.length);
+    console.log("  📋 Última observación guardada:", actividad.observaciones[actividad.observaciones.length - 1]);
 
     res.json(actividad);
   } catch (err) {
