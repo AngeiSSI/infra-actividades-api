@@ -66,7 +66,9 @@ const actividadSchema = new mongoose.Schema({
   horasAcumuladas: { type: Number, default: 0 },
   observaciones: [{
     fecha: { type: Date, default: Date.now },
-    comentario: String
+    comentario: String,
+    usuario: String,  // ✅ NUEVO: Quién hizo la observación
+    rol: String      // ✅ NUEVO: Rol del usuario
   }]
 });
 
@@ -472,7 +474,6 @@ app.post('/actividades', auth, async (req, res) => {
 });
 
 /* ================= OBSERVACIONES ================= */
-
 app.post('/actividades/:id/observaciones', auth, async (req, res) => {
   try {
     console.log("\n📝 POST /actividades/:id/observaciones - User:", req.user.nombre);
@@ -485,7 +486,13 @@ app.post('/actividades/:id/observaciones', auth, async (req, res) => {
       return res.status(404).json({ error: "Actividad no encontrada" });
     }
 
-    actividad.observaciones.push({ comentario, fecha: new Date() });
+    // ✅ GUARDAR USUARIO Y ROL EN LA OBSERVACIÓN
+    actividad.observaciones.push({ 
+      comentario, 
+      fecha: new Date(),
+      usuario: req.user.nombre,  // ✅ AGREGAR ESTO
+      rol: req.user.rol          // ✅ AGREGAR ESTO
+    });
 
     if (horas) {
       actividad.horasAcumuladas += horas;
@@ -496,7 +503,8 @@ app.post('/actividades/:id/observaciones', auth, async (req, res) => {
     await actividad.save();
 
     console.log("  ✅ Observación agregada");
-    console.log("  📅 fechaModificacion actualizada:", actividad.fechaModificacion);
+    console.log("  👤 Usuario:", req.user.nombre);
+    console.log("  🔑 Rol:", req.user.rol);
 
     res.json(actividad);
   } catch (err) {
@@ -504,7 +512,6 @@ app.post('/actividades/:id/observaciones', auth, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 /* ================= CERRAR ACTIVIDAD (PUT) ================= */
 
 app.put('/actividades/:id/cerrar', auth, async (req, res) => {
