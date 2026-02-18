@@ -178,15 +178,19 @@ app.get('/catalogo', auth, async (req, res) => {
 });
 
 /* ================= USUARIOS - GET ================= */
-
 app.get('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
   try {
     console.log("\n👥 GET /usuarios - User:", req.user.nombre);
     
-    // ✅ Devolver TODOS los usuarios (activos e inactivos)
+    // Debug: Contar todos los usuarios primero
+    const total = await User.countDocuments();
+    console.log("  📊 Total de usuarios en BD:", total);
+    
     const usuarios = await User.find().select('-password');
     
-    console.log("  ✅ Usuarios enviados:", usuarios.length);
+    console.log("  ✅ Usuarios encontrados:", usuarios.length);
+    console.log("  📋 IDs de usuarios:", usuarios.map(u => ({ _id: u._id, nombre: u.nombre, activo: u.activo })));
+    
     res.json(usuarios);
   } catch (err) {
     console.error("  ❌ Error:", err.message);
