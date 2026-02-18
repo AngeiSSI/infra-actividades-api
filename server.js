@@ -476,7 +476,10 @@ app.post('/actividades', auth, async (req, res) => {
 /* ================= OBSERVACIONES ================= */
 app.post('/actividades/:id/observaciones', auth, async (req, res) => {
   try {
-    console.log("\n📝 POST /actividades/:id/observaciones - User:", req.user.nombre);
+    console.log("\n📝 POST /actividades/:id/observaciones");
+    console.log("  🔐 req.user:", req.user);  // ✅ NUEVO LOG
+    console.log("  🔐 req.user.nombre:", req.user?.nombre);  // ✅ NUEVO LOG
+    console.log("  📤 Body recibido:", req.body);  // ✅ NUEVO LOG
 
     const { comentario, horas } = req.body;
 
@@ -486,13 +489,18 @@ app.post('/actividades/:id/observaciones', auth, async (req, res) => {
       return res.status(404).json({ error: "Actividad no encontrada" });
     }
 
+    console.log("  ✅ Actividad encontrada");
+    console.log("  📋 Usuario a guardar:", req.user.nombre);  // ✅ NUEVO LOG
+
     // ✅ GUARDAR USUARIO Y ROL EN LA OBSERVACIÓN
     actividad.observaciones.push({ 
       comentario, 
       fecha: new Date(),
-      usuario: req.user.nombre,  // ✅ AGREGAR ESTO
-      rol: req.user.rol          // ✅ AGREGAR ESTO
+      usuario: req.user.nombre,
+      rol: req.user.rol
     });
+
+    console.log("  ✅ Observación creada con usuario:", req.user.nombre);  // ✅ NUEVO LOG
 
     if (horas) {
       actividad.horasAcumuladas += horas;
@@ -502,9 +510,9 @@ app.post('/actividades/:id/observaciones', auth, async (req, res) => {
 
     await actividad.save();
 
-    console.log("  ✅ Observación agregada");
-    console.log("  👤 Usuario:", req.user.nombre);
-    console.log("  🔑 Rol:", req.user.rol);
+    console.log("  ✅ Actividad guardada");
+    console.log("  📋 Observaciones guardadas:", actividad.observaciones.length);  // ✅ NUEVO LOG
+    console.log("  📋 Última observación guardada:", actividad.observaciones[actividad.observaciones.length - 1]);  // ✅ NUEVO LOG
 
     res.json(actividad);
   } catch (err) {
@@ -512,6 +520,7 @@ app.post('/actividades/:id/observaciones', auth, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 /* ================= CERRAR ACTIVIDAD (PUT) ================= */
 
 app.put('/actividades/:id/cerrar', auth, async (req, res) => {
