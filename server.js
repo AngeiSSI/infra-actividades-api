@@ -36,6 +36,7 @@ const userSchema = new mongoose.Schema({
   email: String,
   password: String,
   rol: String,  // 'lider' | 'senior' | 'coordinador' | 'administrador'
+  grupo: String,  // ✅ AGREGAR ESTE CAMPO
   activo: { type: Boolean, default: true },
   fechaCreacion: { type: Date, default: Date.now }
 });
@@ -193,12 +194,12 @@ app.get('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
 });
 
 /* ================= USUARIOS - POST (Crear) ================= */
-
 app.post('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
   try {
     console.log("\n👤 POST /usuarios - User:", req.user.nombre);
+    console.log("  📤 Datos recibidos:", req.body);
 
-    const { nombre, email, password, rol } = req.body;
+    const { nombre, email, password, rol, grupo } = req.body;
 
     // Verificar que el email no exista
     const existente = await User.findOne({ email });
@@ -211,10 +212,12 @@ app.post('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
       email,
       password,
       rol,
+      grupo,  // ✅ AGREGAR ESTE CAMPO
       activo: true
     });
 
     console.log("  ✅ Usuario creado:", nuevoUsuario._id);
+    console.log("  📋 Datos guardados:", { nombre, email, rol, grupo });
     
     res.status(201).json(nuevoUsuario);
   } catch (err) {
@@ -224,16 +227,16 @@ app.post('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
 });
 
 /* ================= USUARIOS - PUT (Actualizar) ================= */
-
 app.put('/usuarios/:id', auth, esCoordinadorOAdmin, async (req, res) => {
   try {
     console.log("\n✏️ PUT /usuarios/:id - User:", req.user.nombre);
+    console.log("  📤 Datos recibidos:", req.body);
 
-    const { nombre, email, rol, activo } = req.body;
+    const { nombre, email, rol, grupo, activo } = req.body;
 
     const usuario = await User.findByIdAndUpdate(
       req.params.id,
-      { nombre, email, rol, activo },
+      { nombre, email, rol, grupo, activo },  // ✅ AGREGAR grupo AQUÍ
       { new: true }
     ).select('-password');
 
@@ -242,6 +245,7 @@ app.put('/usuarios/:id', auth, esCoordinadorOAdmin, async (req, res) => {
     }
 
     console.log("  ✅ Usuario actualizado:", usuario._id);
+    console.log("  📋 Datos guardados:", { nombre, email, rol, grupo, activo });
     res.json(usuario);
   } catch (err) {
     console.error("  ❌ Error:", err.message);
