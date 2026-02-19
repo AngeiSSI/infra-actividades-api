@@ -48,6 +48,8 @@ const catalogoSchema = new mongoose.Schema({
   tipificacion: String,
   actividad: String,
   diasHabiles: Number,
+  horasMinimas: { type: Number, default: 0 },
+  horasMaximas: { type: Number, default: 0 },
   estado: { type: String, enum: ['oficial', 'pendiente'], default: 'oficial' },
   sugeridoPor: String,
   rolSugeridor: String,
@@ -56,6 +58,8 @@ const catalogoSchema = new mongoose.Schema({
   observaciones: String,
   activo: { type: Boolean, default: true }
 });
+
+const Catalogo = mongoose.model('Catalogo', catalogoSchema, 'catalogos');
 
 const Catalogo = mongoose.model('Catalogo', catalogoSchema, 'catalogos');
 
