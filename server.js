@@ -14,8 +14,13 @@ console.log("🔐 SECRET:", SECRET);
 app.use(cors({
   origin: "*",
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+  optionsSuccessStatus: 200
 }));
+
+// ✅ Responder a preflight requests
+app.options('*', cors());
 
 app.use(express.json());
 
@@ -58,8 +63,6 @@ const catalogoSchema = new mongoose.Schema({
   observaciones: String,
   activo: { type: Boolean, default: true }
 });
-
-const Catalogo = mongoose.model('Catalogo', catalogoSchema, 'catalogos');
 
 const Catalogo = mongoose.model('Catalogo', catalogoSchema, 'catalogos');
 
@@ -391,7 +394,7 @@ app.post('/catalogo', auth, async (req, res) => {
     console.log("\n➕ POST /catalogo - User:", req.user.nombre);
     console.log("  📤 Datos recibidos:", req.body);
 
-    const { tipificacion, actividad, diasHabiles } = req.body;
+    const { tipificacion, actividad, diasHabiles, horasMinimas, horasMaximas } = req.body;
 
     if (!tipificacion || !actividad || !diasHabiles) {
       return res.status(400).json({ error: "Faltan campos requeridos" });
@@ -404,6 +407,8 @@ app.post('/catalogo', auth, async (req, res) => {
       tipificacion,
       actividad,
       diasHabiles,
+      horasMinimas: horasMinimas || 0,
+      horasMaximas: horasMaximas || 0,
       estado: esAutorizado ? 'oficial' : 'pendiente',
       sugeridoPor: req.user.nombre,
       rolSugeridor: req.user.rol
@@ -426,11 +431,11 @@ app.put('/catalogo/:id', auth, esCoordinadorOAdmin, async (req, res) => {
     console.log("\n✏️ PUT /catalogo/:id - User:", req.user.nombre);
     console.log("  📤 Datos recibidos:", req.body);
 
-    const { tipificacion, actividad, diasHabiles } = req.body;
+    const { tipificacion, actividad, diasHabiles, horasMinimas, horasMaximas } = req.body;
 
     const item = await Catalogo.findByIdAndUpdate(
       req.params.id,
-      { tipificacion, actividad, diasHabiles },
+      { tipificacion, actividad, diasHabiles, horasMinimas, horasMaximas },
       { new: true, runValidators: false }
     );
 
