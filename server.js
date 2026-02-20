@@ -10,17 +10,24 @@ const SECRET = "infra-secret-key";
 
 console.log("🔐 SECRET:", SECRET);
 
-/* ================= CORS ================= */
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+/* ================= CORS (PRIMERO, ANTES QUE TODO) ================= */
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Permitir requests sin origin (mobile apps, curl requests)
+    if (!origin || origin.includes('localhost') || origin.includes('github.dev')) {
+      return callback(null, true);
+    }
+    callback(new Error('Not allowed by CORS'));
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
-  optionsSuccessStatus: 200
-}));
+  optionsSuccessStatus: 200,
+  maxAge: 3600
+};
 
-// ✅ Responder a preflight requests
-app.options('*', cors());
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // ✅ Preflight para todas las rutas
 
 app.use(express.json());
 
@@ -79,11 +86,12 @@ const actividadSchema = new mongoose.Schema({
   estadoCaso: { type: String, default: "no aplica" },
   horas: { type: Number, default: 0 },
   horasAcumuladas: { type: Number, default: 0 },
+  horasMes: { type: Number, default: 0 },
   observaciones: [{
     fecha: { type: Date, default: Date.now },
     comentario: String,
     usuario: String,
-    rol: String
+    rol: String,
     horas: { type: Number, default: 0 }
   }]
 });
@@ -158,7 +166,7 @@ app.post('/login', async (req, res) => {
     console.log("  🔐 primeraVez en BD:", user.primeraVez);
 
     const token = jwt.sign(
-      { id: user._id, nombre: user.nombre, rol: user.rol },
+      { id: user._id, nombre: user.nombre, rol: user.rol, grupo: user.grupo },
       SECRET,
       { expiresIn: '30d' }
     );
@@ -170,6 +178,7 @@ app.post('/login', async (req, res) => {
       usuario: {
         nombre: user.nombre,
         rol: user.rol,
+        grupo: user.grupo,
         primeraVez: user.primeraVez
       }
     };
@@ -784,7 +793,7 @@ app.post('/actividades/:id/observaciones', auth, async (req, res) => {
       fecha: new Date(),
       usuario: req.user.nombre,
       rol: req.user.rol,
-      horas: horas ? parseFloat(horas) : 0  // ✅ AGREGAR LAS HORAS AQUÍ
+      horas: horas ? parseFloat(horas) : 0
     };
 
     console.log("  📝 Observación a guardar:", nuevaObservacion);
