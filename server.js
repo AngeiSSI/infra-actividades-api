@@ -927,6 +927,128 @@ function calcularProgreso(actividad) {
   return (hoy - inicio) / (fin - inicio);
 }
 
+/* ================= MODELO ASIGNACIONES ================= */
+const asignacionSchema = new mongoose.Schema({
+  liderAsignado: String,
+  proyecto: String,
+  idFeature: String,
+  tipologia: String,
+  porcentajeAsignacion: { type: Number, default: 0 },
+  liSenior: String,
+  liderTecnico: String,
+  scrum: String,
+  po: String,
+  liderTecnicoFV: String,
+  gerente: String,
+  flujoValor: String,
+  celula: String,
+  pep: String,
+  fechaAsignacion: { type: Date, default: Date.now },
+  fechaFinAsignacion: Date,
+  estado: { type: String, default: "activo" },
+  fechaCreacion: { type: Date, default: Date.now },
+  fechaModificacion: { type: Date, default: Date.now }
+});
+
+const Asignacion = mongoose.model('Asignacion', asignacionSchema, 'asignaciones');
+
+/* ================= ASIGNACIONES - GET ================= */
+app.get('/asignaciones', auth, async (req, res) => {
+  try {
+    console.log("\n📋 GET /asignaciones - User:", req.user.nombre);
+    const asignaciones = await Asignacion.find().sort({ fechaAsignacion: -1 });
+    console.log("  ✅ Asignaciones enviadas:", asignaciones.length);
+    res.json(asignaciones);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= ASIGNACIONES - POST (Crear) ================= */
+app.post('/asignaciones', auth, async (req, res) => {
+  try {
+    console.log("\n➕ POST /asignaciones - User:", req.user.nombre);
+    console.log("  📤 Datos recibidos:", req.body);
+
+    const rol = req.user.rol?.toLowerCase();
+    const esAutorizado = rol === 'administrador' || rol === 'coordinador' || rol === 'senior';
+
+    if (!esAutorizado) {
+      return res.status(403).json({ error: "No tienes permisos para crear asignaciones" });
+    }
+
+    const nueva = await Asignacion.create({
+      ...req.body,
+      fechaCreacion: new Date(),
+      fechaModificacion: new Date()
+    });
+
+    console.log("  ✅ Asignación creada:", nueva._id);
+    res.status(201).json(nueva);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= ASIGNACIONES - PUT (Actualizar) ================= */
+app.put('/asignaciones/:id', auth, async (req, res) => {
+  try {
+    console.log("\n✏️ PUT /asignaciones/:id - User:", req.user.nombre);
+    console.log("  📤 Datos recibidos:", req.body);
+
+    const rol = req.user.rol?.toLowerCase();
+    const esAutorizado = rol === 'administrador' || rol === 'coordinador' || rol === 'senior';
+
+    if (!esAutorizado) {
+      return res.status(403).json({ error: "No tienes permisos para editar asignaciones" });
+    }
+
+    const asignacion = await Asignacion.findByIdAndUpdate(
+      req.params.id,
+      { ...req.body, fechaModificacion: new Date() },
+      { new: true, runValidators: false }
+    );
+
+    if (!asignacion) {
+      return res.status(404).json({ error: "Asignación no encontrada" });
+    }
+
+    console.log("  ✅ Asignación actualizada:", asignacion._id);
+    res.json(asignacion);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= ASIGNACIONES - DELETE ================= */
+app.delete('/asignaciones/:id', auth, async (req, res) => {
+  try {
+    console.log("\n🗑️ DELETE /asignaciones/:id - User:", req.user.nombre);
+
+    const rol = req.user.rol?.toLowerCase();
+    const esAutorizado = rol === 'administrador' || rol === 'coordinador' || rol === 'senior';
+
+    if (!esAutorizado) {
+      return res.status(403).json({ error: "No tienes permisos para eliminar asignaciones" });
+    }
+
+    const asignacion = await Asignacion.findByIdAndDelete(req.params.id);
+
+    if (!asignacion) {
+      return res.status(404).json({ error: "Asignación no encontrada" });
+    }
+
+    console.log("  ✅ Asignación eliminada:", req.params.id);
+    res.json({ mensaje: "Asignación eliminada correctamente" });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* ================= TEST ================= */
 
 app.get('/', (req, res) => {
