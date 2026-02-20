@@ -84,6 +84,7 @@ const actividadSchema = new mongoose.Schema({
     comentario: String,
     usuario: String,
     rol: String
+    horas: { type: Number, default: 0 }
   }]
 });
 
