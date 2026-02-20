@@ -775,18 +775,28 @@ app.post('/actividades/:id/observaciones', auth, async (req, res) => {
 
     console.log("  ✅ Actividad encontrada");
     console.log("  📋 Usuario a guardar:", req.user.nombre);
+    console.log("  ⏱️ Horas recibidas:", horas);
 
-    actividad.observaciones.push({ 
-      comentario, 
+    // Crear la observación con todas las propiedades
+    const nuevaObservacion = {
+      comentario,
       fecha: new Date(),
       usuario: req.user.nombre,
-      rol: req.user.rol
-    });
+      rol: req.user.rol,
+      horas: horas ? parseFloat(horas) : 0  // ✅ AGREGAR LAS HORAS AQUÍ
+    };
+
+    console.log("  📝 Observación a guardar:", nuevaObservacion);
+
+    actividad.observaciones.push(nuevaObservacion);
 
     console.log("  ✅ Observación creada con usuario:", req.user.nombre);
+    console.log("  ⏱️ Observación con horas:", horas);
 
-    if (horas) {
-      actividad.horasAcumuladas += horas;
+    // Actualizar horasAcumuladas si hay horas
+    if (horas && horas > 0) {
+      actividad.horasAcumuladas = (actividad.horasAcumuladas || 0) + parseFloat(horas);
+      console.log("  📊 horasAcumuladas actualizado a:", actividad.horasAcumuladas);
     }
 
     actividad.fechaModificacion = new Date();
