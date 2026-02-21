@@ -4,6 +4,9 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
+const cron = require('node-cron');
+const axios = require('axios');
+const { enviarAlCanalTeams, generarTablaTeams } = require('./notificaciones-teams');
 
 const app = express();
 const SECRET = "infra-secret-key";
@@ -13,7 +16,6 @@ console.log("🔐 SECRET:", SECRET);
 /* ================= CORS (PRIMERO, ANTES QUE TODO) ================= */
 const corsOptions = {
   origin: function (origin, callback) {
-    // Permitir requests sin origin (mobile apps, curl requests)
     if (!origin || origin.includes('localhost') || origin.includes('github.dev')) {
       return callback(null, true);
     }
@@ -27,8 +29,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // ✅ Preflight para todas las rutas
-
+app.options('*', cors(corsOptions));
 app.use(express.json());
 
 /* ================= DB ================= */
@@ -55,7 +56,6 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', userSchema, 'users');
 
-/* ================= MODELO CATÁLOGO CON SUGERENCIAS ================= */
 const catalogoSchema = new mongoose.Schema({
   tipificacion: String,
   actividad: String,
@@ -108,6 +108,29 @@ const accesoSchema = new mongoose.Schema({
 
 const Acceso = mongoose.model('Acceso', accesoSchema, 'accesos');
 
+const asignacionSchema = new mongoose.Schema({
+  liderAsignado: String,
+  proyecto: String,
+  idFeature: String,
+  tipologia: String,
+  porcentajeAsignacion: { type: Number, default: 0 },
+  liSenior: String,
+  liderTecnico: String,
+  scrum: String,
+  po: String,
+  liderTecnicoFV: String,
+  gerente: String,
+  flujoValor: String,
+  celula: String,
+  pep: String,
+  fechaAsignacion: { type: Date, default: Date.now },
+  fechaFinAsignacion: Date,
+  estado: { type: String, default: "activo" },
+  fechaCreacion: { type: Date, default: Date.now },
+  fechaModificacion: { type: Date, default: Date.now }
+});
+
+const Asignacion = mongoose.model('Asignacion', asignacionSchema, 'asignaciones');
 
 /* ================= AUTH MIDDLEWARE ================= */
 
@@ -143,6 +166,71 @@ function esCoordinadorOAdmin(req, res, next) {
     return res.status(403).json({ error: "Acceso denegado - requiere permisos de Coordinador o Administrador" });
   }
   next();
+}
+
+/* ================= FUNCIONES AUXILIARES ================= */
+
+function calcularDiasHabiles(fechaInicio, fechaFin) {
+  let diasHabiles = 0;
+  let fechaActual = new Date(fechaInicio);
+  
+  while (fechaActual < fechaFin) {
+    const dia = fechaActual.getDay();
+    if (dia !== 0 && dia !== 6) {
+      diasHabiles++;
+    }
+    fechaActual.setDate(fechaActual.getDate() + 1);
+  }
+  
+  return diasHabiles;
+}
+
+async function esDiaLaboral(fecha = new Date()) {
+  try {
+    const fechaStr = fecha.toISOString().split('T')[0];
+    
+    // Consultar directamente la colección de festivos
+    const festivo = await mongoose.connection.collection('festivos').findOne({
+      fecha: {
+        $gte: new Date(fechaStr + 'T00:00:00Z'),
+        $lt: new Date(fechaStr + 'T23:59:59Z')
+      }
+    });
+
+    const diaSemana = fecha.getDay();
+    const esFinDeSemana = diaSemana === 0 || diaSemana === 6;
+    const esFestivo = !!festivo;
+
+    return !esFinDeSemana && !esFestivo;
+  } catch (error) {
+    console.error('Error al verificar día laboral:', error);
+    return true;
+  }
+}
+
+function sumarDiasHabiles(fecha, dias) {
+  let resultado = new Date(fecha);
+  let agregados = 0;
+
+  while (agregados < dias) {
+    resultado.setDate(resultado.getDate() + 1);
+    const dia = resultado.getDay();
+    if (dia !== 0 && dia !== 6) agregados++;
+  }
+
+  return resultado;
+}
+
+function calcularProgreso(actividad) {
+  if (!actividad.fechaCierre) return 0;
+
+  const inicio = new Date(actividad.fechaCreacion).getTime();
+  const fin = new Date(actividad.fechaCierre).getTime();
+  const hoy = Date.now();
+
+  if (hoy >= fin) return 1;
+
+  return (hoy - inicio) / (fin - inicio);
 }
 
 /* ================= LOGIN ================= */
@@ -193,7 +281,6 @@ app.post('/login', async (req, res) => {
 });
 
 /* ================= CAMBIAR CONTRASEÑA (Primera Vez) ================= */
-
 app.post('/cambiar-password-primera-vez', auth, async (req, res) => {
   try {
     console.log("\n🔐 POST /cambiar-password-primera-vez - User:", req.user.nombre);
@@ -225,7 +312,6 @@ app.post('/cambiar-password-primera-vez', auth, async (req, res) => {
 });
 
 /* ================= RECUPERAR CONTRASEÑA (ENVIAR EMAIL) ================= */
-
 app.post('/recuperar-password', async (req, res) => {
   try {
     console.log("\n🔐 POST /recuperar-password");
@@ -268,7 +354,6 @@ app.post('/recuperar-password', async (req, res) => {
 });
 
 /* ================= RESETEAR CONTRASEÑA (CON TOKEN) ================= */
-
 app.post('/resetear-password', async (req, res) => {
   try {
     console.log("\n🔐 POST /resetear-password");
@@ -314,7 +399,6 @@ app.post('/resetear-password', async (req, res) => {
 });
 
 /* ================= RESETEAR CONTRASEÑA (COORDINADOR/ADMIN) ================= */
-
 app.put('/usuarios/:id/resetear-password', auth, esCoordinadorOAdmin, async (req, res) => {
   try {
     console.log("\n🔐 PUT /usuarios/:id/resetear-password - User:", req.user.nombre);
@@ -351,7 +435,6 @@ app.put('/usuarios/:id/resetear-password', auth, esCoordinadorOAdmin, async (req
 });
 
 /* ================= ADMIN - ACTUALIZAR TODOS LOS USUARIOS ================= */
-
 app.post('/admin/actualizar-usuarios-primera-vez', async (req, res) => {
   try {
     console.log("\n🔧 POST /admin/actualizar-usuarios-primera-vez");
@@ -376,7 +459,7 @@ app.post('/admin/actualizar-usuarios-primera-vez', async (req, res) => {
 app.get('/catalogo', auth, async (req, res) => {
   try {
     console.log("\n📖 GET /catalogo - User:", req.user.nombre);
-    const lista = await Catalogo.find({ estado: 'oficial', activo: true });
+    const lista = await Catalogo.find({ estado: 'oficial', activo: true }).sort({ actividad: 1 });
     console.log("  ✅ Catálogo oficial enviado:", lista.length, "items");
     res.json(lista);
   } catch (err) {
@@ -389,7 +472,7 @@ app.get('/catalogo', auth, async (req, res) => {
 app.get('/catalogo/todos', auth, esCoordinadorOAdmin, async (req, res) => {
   try {
     console.log("\n📖 GET /catalogo/todos - User:", req.user.nombre);
-    const lista = await Catalogo.find({ activo: true }).sort({ estado: -1, fechaSugerencia: -1 });
+    const lista = await Catalogo.find({ activo: true }).sort({ estado: -1, actividad: 1 });
     console.log("  ✅ Catálogo completo enviado:", lista.length, "items");
     res.json(lista);
   } catch (err) {
@@ -557,7 +640,6 @@ app.get('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
 });
 
 /* ================= USUARIOS - POST (Crear) ================= */
-
 app.post('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
   try {
     console.log("\n👤 POST /usuarios - User:", req.user.nombre);
@@ -592,7 +674,6 @@ app.post('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
 });
 
 /* ================= USUARIOS - PUT (Actualizar) ================= */
-
 app.put('/usuarios/:id', auth, esCoordinadorOAdmin, async (req, res) => {
   try {
     console.log("\n✏️ PUT /usuarios/:id - User:", req.user.nombre);
@@ -620,7 +701,6 @@ app.put('/usuarios/:id', auth, esCoordinadorOAdmin, async (req, res) => {
 });
 
 /* ================= USUARIOS - DELETE ================= */
-
 app.delete('/usuarios/:id', auth, esCoordinadorOAdmin, async (req, res) => {
   try {
     console.log("\n🗑️ DELETE /usuarios/:id - User:", req.user.nombre);
@@ -644,7 +724,6 @@ app.delete('/usuarios/:id', auth, esCoordinadorOAdmin, async (req, res) => {
 });
 
 /* ================= ACCESOS - GET ================= */
-
 app.get('/accesos', auth, esCoordinadorOAdmin, async (req, res) => {
   try {
     console.log("\n🔐 GET /accesos - User:", req.user.nombre);
@@ -667,7 +746,6 @@ app.get('/accesos', auth, esCoordinadorOAdmin, async (req, res) => {
 });
 
 /* ================= ACCESOS - POST (Actualizar accesos de usuario) ================= */
-
 app.post('/usuarios/:id/accesos', auth, esCoordinadorOAdmin, async (req, res) => {
   try {
     console.log("\n🔐 POST /usuarios/:id/accesos - User:", req.user.nombre);
@@ -695,7 +773,6 @@ app.post('/usuarios/:id/accesos', auth, esCoordinadorOAdmin, async (req, res) =>
 });
 
 /* ================= ACTIVIDADES - GET ================= */
-
 app.get('/actividades', auth, async (req, res) => {
   try {
     console.log("\n📋 GET /actividades - User:", req.user.nombre);
@@ -729,7 +806,6 @@ app.get('/actividades', auth, async (req, res) => {
 });
 
 /* ================= CREAR ACTIVIDAD ================= */
-
 app.post('/actividades', auth, async (req, res) => {
   try {
     console.log("\n✏️ POST /actividades - User:", req.user.nombre);
@@ -787,7 +863,6 @@ app.post('/actividades/:id/observaciones', auth, async (req, res) => {
     console.log("  📋 Usuario a guardar:", req.user.nombre);
     console.log("  ⏱️ Horas recibidas:", horas);
 
-    // Crear la observación con todas las propiedades
     const nuevaObservacion = {
       comentario,
       fecha: new Date(),
@@ -803,7 +878,6 @@ app.post('/actividades/:id/observaciones', auth, async (req, res) => {
     console.log("  ✅ Observación creada con usuario:", req.user.nombre);
     console.log("  ⏱️ Observación con horas:", horas);
 
-    // Actualizar horasAcumuladas si hay horas
     if (horas && horas > 0) {
       actividad.horasAcumuladas = (actividad.horasAcumuladas || 0) + parseFloat(horas);
       console.log("  📊 horasAcumuladas actualizado a:", actividad.horasAcumuladas);
@@ -825,7 +899,6 @@ app.post('/actividades/:id/observaciones', auth, async (req, res) => {
 });
 
 /* ================= CERRAR ACTIVIDAD (PUT) ================= */
-
 app.put('/actividades/:id/cerrar', auth, async (req, res) => {
   try {
     console.log("\n🔒 PUT /actividades/:id/cerrar - User:", req.user.nombre);
@@ -863,7 +936,6 @@ app.put('/actividades/:id/cerrar', auth, async (req, res) => {
 });
 
 /* ================= CERRAR ACTIVIDAD (POST) ================= */
-
 app.post('/actividades/:id/cerrar', auth, async (req, res) => {
   try {
     console.log("\n🔒 POST /actividades/:id/cerrar - User:", req.user.nombre);
@@ -900,57 +972,99 @@ app.post('/actividades/:id/cerrar', auth, async (req, res) => {
   }
 });
 
-/* ================= UTILS ================= */
+/* ================= RESUMEN CONSOLIDADO DE TAREAS - TEAMS ================= */
+app.post('/resumen-consolidado-tareas', async (req, res) => {
+  try {
+    console.log('\n📊 POST /resumen-consolidado-tareas');
 
-function sumarDiasHabiles(fecha, dias) {
-  let resultado = new Date(fecha);
-  let agregados = 0;
+    const esLaboral = await esDiaLaboral();
+    if (!esLaboral) {
+      const diaSemana = new Date().getDay();
+      const dias = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+      console.log(`⏭️ ${dias[diaSemana]} - No es día laboral`);
+      return res.status(400).json({ error: 'No es un día laboral' });
+    }
 
-  while (agregados < dias) {
-    resultado.setDate(resultado.getDate() + 1);
-    const dia = resultado.getDay();
-    if (dia !== 0 && dia !== 6) agregados++;
+    const actividades = await Actividad.find({ estado: 'en progreso' });
+
+    const vencidas = [];
+    const proximasVencer = [];
+
+    for (const actividad of actividades) {
+      if (!actividad.fechaCierre) continue;
+
+      const diasRestantes = calcularDiasHabiles(new Date(), new Date(actividad.fechaCierre));
+
+      if (diasRestantes < 0) {
+        vencidas.push({
+          actividadCatalogo: actividad.actividadCatalogo,
+          lider: actividad.lider,
+          proyecto: actividad.proyecto
+        });
+      }
+
+      if (diasRestantes > 0 && diasRestantes <= 2) {
+        proximasVencer.push({
+          actividadCatalogo: actividad.actividadCatalogo,
+          lider: actividad.lider,
+          proyecto: actividad.proyecto,
+          diasRestantes: diasRestantes
+        });
+      }
+    }
+
+    if (vencidas.length > 0 || proximasVencer.length > 0) {
+      const tabla = generarTablaTeams(vencidas, proximasVencer);
+      const titulo = `📊 Resumen Diario - ${vencidas.length} Vencidas, ${proximasVencer.length} Próximas`;
+      
+      const enviado = await enviarAlCanalTeams(titulo, tabla, vencidas.length > 0 ? '#FF5252' : '#FF9800');
+
+      res.json({
+        mensaje: 'Resumen enviado a Teams',
+        vencidas: vencidas.length,
+        proximasVencer: proximasVencer.length,
+        enviado: enviado
+      });
+    } else {
+      res.json({
+        mensaje: 'No hay tareas para reportar',
+        vencidas: 0,
+        proximasVencer: 0
+      });
+    }
+  } catch (err) {
+    console.error('❌ Error:', err.message);
+    res.status(500).json({ error: err.message });
   }
-
-  return resultado;
-}
-
-function calcularProgreso(actividad) {
-  if (!actividad.fechaCierre) return 0;
-
-  const inicio = new Date(actividad.fechaCreacion).getTime();
-  const fin = new Date(actividad.fechaCierre).getTime();
-  const hoy = Date.now();
-
-  if (hoy >= fin) return 1;
-
-  return (hoy - inicio) / (fin - inicio);
-}
-
-/* ================= MODELO ASIGNACIONES ================= */
-const asignacionSchema = new mongoose.Schema({
-  liderAsignado: String,
-  proyecto: String,
-  idFeature: String,
-  tipologia: String,
-  porcentajeAsignacion: { type: Number, default: 0 },
-  liSenior: String,
-  liderTecnico: String,
-  scrum: String,
-  po: String,
-  liderTecnicoFV: String,
-  gerente: String,
-  flujoValor: String,
-  celula: String,
-  pep: String,
-  fechaAsignacion: { type: Date, default: Date.now },
-  fechaFinAsignacion: Date,
-  estado: { type: String, default: "activo" },
-  fechaCreacion: { type: Date, default: Date.now },
-  fechaModificacion: { type: Date, default: Date.now }
 });
 
-const Asignacion = mongoose.model('Asignacion', asignacionSchema, 'asignaciones');
+/* ================= CRON JOB - RESUMEN DIARIO ================= */
+cron.schedule('0 8 * * *', async () => {
+  try {
+    const esLaboral = await esDiaLaboral();
+    if (!esLaboral) {
+      const dias = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+      console.log(`\n⏭️ [CRON] ${dias[new Date().getDay()]} - No es día laboral`);
+      return;
+    }
+    console.log('\n📊 [CRON] 08:00 AM - Enviando resumen...');
+    await axios.post('http://localhost:3000/resumen-consolidado-tareas', {});
+  } catch (err) {
+    console.error('Error CRON:', err.message);
+  }
+});
+
+console.log(`
+⏰ ═════════════════════════════════════════
+   CONFIGURACIÓN DE RESUMEN DIARIO
+⏰ ═════════════════════════════════════════
+   • Horario: 08:00 AM
+   • Frecuencia: Diaria
+   • Días: Lunes a Viernes
+   • Excluye: Fines de semana y festivos
+   • Destino: Teams (canal configurado)
+⏰ ═════════════════════════════════════════
+`);
 
 /* ================= ASIGNACIONES - GET ================= */
 app.get('/asignaciones', auth, async (req, res) => {
@@ -1050,7 +1164,6 @@ app.delete('/asignaciones/:id', auth, async (req, res) => {
 });
 
 /* ================= TEST ================= */
-
 app.get('/', (req, res) => {
   res.send('API Infra funcionando 🚀');
 });
@@ -1060,7 +1173,6 @@ app.get('/health', (req, res) => {
 });
 
 /* ================= SERVER ================= */
-
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log("\n🚀 Server running on port", port);
