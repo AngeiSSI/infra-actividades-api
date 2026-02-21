@@ -16,9 +16,18 @@ console.log("🔐 SECRET:", SECRET);
 /* ================= CORS (PRIMERO, ANTES QUE TODO) ================= */
 const corsOptions = {
   origin: function (origin, callback) {
-    if (!origin || origin.includes('localhost') || origin.includes('github.dev')) {
+    const allowedOrigins = [
+      'http://localhost:4200',
+      'https://organic-barnacle-r4966xjjvxrrcwqw4-4200.app.github.dev',
+      'http://localhost:3000',
+      'https://localhost:3000'
+    ];
+    
+    if (!origin || allowedOrigins.includes(origin) || origin?.includes('github.dev')) {
       return callback(null, true);
     }
+    
+    console.log('❌ CORS BLOQUEADO - Origin:', origin);
     callback(new Error('Not allowed by CORS'));
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
