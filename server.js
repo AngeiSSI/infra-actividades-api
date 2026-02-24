@@ -13,7 +13,7 @@ const SECRET = "infra-secret-key";
 
 console.log("🔐 SECRET:", SECRET);
 
-/* ================= CORS (PRIMERO, ANTES QUE TODO) ================= */
+/* ================= CORS ================= */
 const corsOptions = {
   origin: function (origin, callback) {
     const allowedOrigins = [
@@ -149,7 +149,6 @@ const asignacionSchema = new mongoose.Schema({
 
 const Asignacion = mongoose.model('Asignacion', asignacionSchema, 'asignaciones');
 
-/* ================= HISTORIAL DE VENCIMIENTOS ================= */
 const historialSchema = new mongoose.Schema({
   actividadId: mongoose.Schema.Types.ObjectId,
   lider: String,
@@ -232,7 +231,6 @@ async function esDiaLaboral(fecha = new Date()) {
   try {
     const fechaStr = fecha.toISOString().split('T')[0];
     
-    // Consultar directamente la colección de festivos
     const festivo = await mongoose.connection.collection('festivos').findOne({
       fecha: {
         $gte: new Date(fechaStr + 'T00:00:00Z'),
@@ -1516,4 +1514,4 @@ app.post('/asignaciones', auth, async (req, res) => {
     console.log("  ✅ Asignación creada:", nueva._id);
     res.status(201).json(nueva);
   } catch (err) {
-    
+    console.error("  
