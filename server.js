@@ -149,6 +149,32 @@ const asignacionSchema = new mongoose.Schema({
 
 const Asignacion = mongoose.model('Asignacion', asignacionSchema, 'asignaciones');
 
+/* ================= HISTORIAL DE VENCIMIENTOS ================= */
+const historialSchema = new mongoose.Schema({
+  actividadId: mongoose.Schema.Types.ObjectId,
+  lider: String,
+  proyecto: String,
+  actividadCatalogo: String,
+  tipificacion: String,
+  descripcion: String,
+  fechaCierre: Date,
+  justificacion: {
+    texto: String,
+    usuario: String,
+    fecha: Date,
+    asunto: String
+  },
+  decision: {
+    estado: { type: String, enum: ['aprobado', 'rechazado'] },
+    coordinador: String,
+    comentario: String,
+    fecha: Date
+  },
+  fechaCreacion: { type: Date, default: Date.now }
+});
+
+const Historial = mongoose.model('Historial', historialSchema, 'historial_vencimientos');
+
 /* ================= AUTH MIDDLEWARE ================= */
 
 function auth(req, res, next) {
@@ -1097,6 +1123,31 @@ app.post('/actividades/:id/aprobar-cierre', auth, esCoordinadorOAdmin, async (re
     console.log("  ✅ Actividad encontrada:", actividad._id);
     console.log("  👤 Aprobado por:", req.user.nombre);
 
+    // Guardar en historial ANTES de cambiar el estado
+    const registroHistorial = await Historial.create({
+      actividadId: actividad._id,
+      lider: actividad.lider,
+      proyecto: actividad.proyecto,
+      actividadCatalogo: actividad.actividadCatalogo,
+      tipificacion: actividad.tipificacion,
+      descripcion: actividad.descripcion,
+      fechaCierre: actividad.fechaCierre,
+      justificacion: {
+        texto: actividad.justificacionCierre?.texto,
+        usuario: actividad.justificacionCierre?.usuario,
+        fecha: actividad.justificacionCierre?.fecha,
+        asunto: actividad.justificacionCierre?.asunto
+      },
+      decision: {
+        estado: 'aprobado',
+        coordinador: req.user.nombre,
+        comentario: comentario || 'Aprobado',
+        fecha: new Date()
+      }
+    });
+
+    console.log("  📋 Registro en historial creado:", registroHistorial._id);
+
     // Actualizar justificación
     actividad.justificacionCierre = {
       ...actividad.justificacionCierre,
@@ -1118,7 +1169,6 @@ app.post('/actividades/:id/aprobar-cierre', auth, esCoordinadorOAdmin, async (re
     const lider = await User.findOne({ nombre: actividad.lider });
     if (lider) {
       console.log("  📧 Notificando al líder:", lider.nombre);
-      // Si tienes Teams:
       try {
         await enviarAlCanalTeams(
           '✅ Tu justificación fue APROBADA',
@@ -1132,6 +1182,7 @@ app.post('/actividades/:id/aprobar-cierre', auth, esCoordinadorOAdmin, async (re
 ${comentario || 'Aprobado'}
 
 **Estado:** Cerrado
+**Guardado en Historial:** Sí
           `,
           '#4CAF50'
         );
@@ -1173,6 +1224,31 @@ app.post('/actividades/:id/rechazar-cierre', auth, esCoordinadorOAdmin, async (r
     console.log("  👤 Rechazado por:", req.user.nombre);
     console.log("  📝 Motivo:", comentario);
 
+    // Guardar en historial ANTES de cambiar el estado
+    const registroHistorial = await Historial.create({
+      actividadId: actividad._id,
+      lider: actividad.lider,
+      proyecto: actividad.proyecto,
+      actividadCatalogo: actividad.actividadCatalogo,
+      tipificacion: actividad.tipificacion,
+      descripcion: actividad.descripcion,
+      fechaCierre: actividad.fechaCierre,
+      justificacion: {
+        texto: actividad.justificacionCierre?.texto,
+        usuario: actividad.justificacionCierre?.usuario,
+        fecha: actividad.justificacionCierre?.fecha,
+        asunto: actividad.justificacionCierre?.asunto
+      },
+      decision: {
+        estado: 'rechazado',
+        coordinador: req.user.nombre,
+        comentario: comentario,
+        fecha: new Date()
+      }
+    });
+
+    console.log("  📋 Registro en historial creado:", registroHistorial._id);
+
     // Actualizar justificación
     actividad.justificacionCierre = {
       ...actividad.justificacionCierre,
@@ -1208,6 +1284,7 @@ ${comentario}
 ⏳ **Acción requerida:** Debes reenviar una justificación mejorada
 
 👉 Accede a: Mis Actividades para reenviar la justificación
+**Guardado en Historial:** Sí
           `,
           '#CC0000'
         );
@@ -1217,6 +1294,93 @@ ${comentario}
     }
 
     res.json(actividad);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= HISTORIAL DE VENCIMIENTOS - GET ================= */
+app.get('/historial-vencimientos', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n📊 GET /historial-vencimientos - User:", req.user.nombre);
+
+    const { lider, proyecto, estado } = req.query;
+    let filtro = {};
+
+    if (lider) {
+      filtro.lider = lider;
+    }
+
+    if (proyecto) {
+      filtro.proyecto = proyecto;
+    }
+
+    if (estado) {
+      filtro['decision.estado'] = estado;
+    }
+
+    const historial = await Historial.find(filtro).sort({ 'decision.fecha': -1 });
+
+    console.log("  ✅ Registros de historial encontrados:", historial.length);
+    res.json(historial);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= HISTORIAL DE VENCIMIENTOS - POR ACTIVIDAD ================= */
+app.get('/historial-vencimientos/:actividadId', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n📊 GET /historial-vencimientos/:actividadId - User:", req.user.nombre);
+
+    const registros = await Historial.find({ actividadId: req.params.actividadId }).sort({ 'decision.fecha': -1 });
+
+    console.log("  ✅ Registros encontrados para actividad:", registros.length);
+    res.json(registros);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= HISTORIAL ESTADÍSTICAS ================= */
+app.get('/historial-vencimientos-stats', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n📊 GET /historial-vencimientos-stats - User:", req.user.nombre);
+
+    const total = await Historial.countDocuments();
+    const aprobados = await Historial.countDocuments({ 'decision.estado': 'aprobado' });
+    const rechazados = await Historial.countDocuments({ 'decision.estado': 'rechazado' });
+
+    const porLider = await Historial.aggregate([
+      {
+        $group: {
+          _id: '$lider',
+          total: { $sum: 1 },
+          aprobados: {
+            $sum: { $cond: [{ $eq: ['$decision.estado', 'aprobado'] }, 1, 0] }
+          },
+          rechazados: {
+            $sum: { $cond: [{ $eq: ['$decision.estado', 'rechazado'] }, 1, 0] }
+          }
+        }
+      },
+      { $sort: { total: -1 } }
+    ]);
+
+    console.log("  ✅ Estadísticas calculadas");
+
+    res.json({
+      resumen: {
+        total,
+        aprobados,
+        rechazados,
+        porcentajeAprobacion: total > 0 ? ((aprobados / total) * 100).toFixed(2) : 0
+      },
+      porLider
+    });
   } catch (err) {
     console.error("  ❌ Error:", err.message);
     res.status(500).json({ error: err.message });
@@ -1350,83 +1514,4 @@ app.post('/asignaciones', auth, async (req, res) => {
     });
 
     console.log("  ✅ Asignación creada:", nueva._id);
-    res.status(201).json(nueva);
-  } catch (err) {
-    console.error("  ❌ Error:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/* ================= ASIGNACIONES - PUT (Actualizar) ================= */
-app.put('/asignaciones/:id', auth, async (req, res) => {
-  try {
-    console.log("\n✏️ PUT /asignaciones/:id - User:", req.user.nombre);
-    console.log("  📤 Datos recibidos:", req.body);
-
-    const rol = req.user.rol?.toLowerCase();
-    const esAutorizado = rol === 'administrador' || rol === 'coordinador' || rol === 'senior';
-
-    if (!esAutorizado) {
-      return res.status(403).json({ error: "No tienes permisos para editar asignaciones" });
-    }
-
-    const asignacion = await Asignacion.findByIdAndUpdate(
-      req.params.id,
-      { ...req.body, fechaModificacion: new Date() },
-      { new: true, runValidators: false }
-    );
-
-    if (!asignacion) {
-      return res.status(404).json({ error: "Asignación no encontrada" });
-    }
-
-    console.log("  ✅ Asignación actualizada:", asignacion._id);
-    res.json(asignacion);
-  } catch (err) {
-    console.error("  ❌ Error:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/* ================= ASIGNACIONES - DELETE ================= */
-app.delete('/asignaciones/:id', auth, async (req, res) => {
-  try {
-    console.log("\n🗑️ DELETE /asignaciones/:id - User:", req.user.nombre);
-
-    const rol = req.user.rol?.toLowerCase();
-    const esAutorizado = rol === 'administrador' || rol === 'coordinador' || rol === 'senior';
-
-    if (!esAutorizado) {
-      return res.status(403).json({ error: "No tienes permisos para eliminar asignaciones" });
-    }
-
-    const asignacion = await Asignacion.findByIdAndDelete(req.params.id);
-
-    if (!asignacion) {
-      return res.status(404).json({ error: "Asignación no encontrada" });
-    }
-
-    console.log("  ✅ Asignación eliminada:", req.params.id);
-    res.json({ mensaje: "Asignación eliminada correctamente" });
-  } catch (err) {
-    console.error("  ❌ Error:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/* ================= TEST ================= */
-app.get('/', (req, res) => {
-  res.send('API Infra funcionando 🚀');
-});
-
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', secret: SECRET });
-});
-
-/* ================= SERVER ================= */
-const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log("\n🚀 Server running on port", port);
-  console.log("🔐 JWT_SECRET:", SECRET);
-  console.log("📊 MONGO_URI:", process.env.MONGO_URI ? "✅ Configurado" : "❌ NO Configurado");
-});
+    res.status(201).json(nueva
