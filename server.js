@@ -1514,4 +1514,6 @@ app.post('/asignaciones', auth, async (req, res) => {
     });
 
     console.log("  ✅ Asignación creada:", nueva._id);
-    res.status(201).json(nueva
+    res.status(201).json(nueva);
+  } catch (err) {
+    
