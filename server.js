@@ -1514,4 +1514,85 @@ app.post('/asignaciones', auth, async (req, res) => {
     console.log("  ✅ Asignación creada:", nueva._id);
     res.status(201).json(nueva);
   } catch (err) {
-    console.error("  
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ... (todo lo anterior que ya tiene)
+
+/* ================= ASIGNACIONES - PUT (Actualizar) ================= */
+app.put('/asignaciones/:id', auth, async (req, res) => {
+  try {
+    console.log("\n✏️ PUT /asignaciones/:id - User:", req.user.nombre);
+    console.log("  📤 Datos recibidos:", req.body);
+
+    const rol = req.user.rol?.toLowerCase();
+    const esAutorizado = rol === 'administrador' || rol === 'coordinador' || rol === 'senior';
+
+    if (!esAutorizado) {
+      return res.status(403).json({ error: "No tienes permisos para editar asignaciones" });
+    }
+
+    const asignacion = await Asignacion.findByIdAndUpdate(
+      req.params.id,
+      { ...req.body, fechaModificacion: new Date() },
+      { new: true, runValidators: false }
+    );
+
+    if (!asignacion) {
+      return res.status(404).json({ error: "Asignación no encontrada" });
+    }
+
+    console.log("  ✅ Asignación actualizada:", asignacion._id);
+    res.json(asignacion);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= ASIGNACIONES - DELETE ================= */
+app.delete('/asignaciones/:id', auth, async (req, res) => {
+  try {
+    console.log("\n🗑️ DELETE /asignaciones/:id - User:", req.user.nombre);
+
+    const rol = req.user.rol?.toLowerCase();
+    const esAutorizado = rol === 'administrador' || rol === 'coordinador' || rol === 'senior';
+
+    if (!esAutorizado) {
+      return res.status(403).json({ error: "No tienes permisos para eliminar asignaciones" });
+    }
+
+    const asignacion = await Asignacion.findByIdAndDelete(req.params.id);
+
+    if (!asignacion) {
+      return res.status(404).json({ error: "Asignación no encontrada" });
+    }
+
+    console.log("  ✅ Asignación eliminada:", req.params.id);
+    res.json({ mensaje: "Asignación eliminada correctamente" });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= TEST ================= */
+app.get('/', (req, res) => {
+  res.send('API Infra funcionando 🚀');
+});
+
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', secret: SECRET });
+});
+
+/* ================= SERVER ================= */
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+  console.log("\n🚀 Server running on port", port);
+  console.log("🔐 JWT_SECRET:", SECRET);
+  console.log("📊 MONGO_URI:", process.env.MONGO_URI ? "✅ Configurado" : "❌ NO Configurado");
+});
+
+                  
