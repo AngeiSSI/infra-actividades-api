@@ -981,6 +981,240 @@ app.post('/actividades/:id/cerrar', auth, async (req, res) => {
   }
 });
 
+/* ================= VALIDAR CIERRE DE TAREA VENCIDA (JUSTIFICACIÓN) ================= */
+app.post('/actividades/:id/validar-cierre', auth, async (req, res) => {
+  try {
+    console.log("\n📋 POST /actividades/:id/validar-cierre - User:", req.user.nombre);
+    console.log("  📤 Body recibido:", req.body);
+
+    const { texto, asunto, estado } = req.body;
+
+    if (!texto || !texto.trim()) {
+      return res.status(400).json({ error: "La justificación no puede estar vacía" });
+    }
+
+    const actividad = await Actividad.findById(req.params.id);
+
+    if (!actividad) {
+      return res.status(404).json({ error: "Actividad no encontrada" });
+    }
+
+    console.log("  ✅ Actividad encontrada:", actividad._id);
+    console.log("  👤 Usuario justificando:", req.user.nombre);
+
+    // Crear la justificación
+    actividad.justificacionCierre = {
+      texto: texto.trim(),
+      usuario: req.user.nombre,
+      fecha: new Date(),
+      asunto: asunto || '',
+      estado: 'pendiente'
+    };
+
+    // Cambiar estado a "pendiente validacion"
+    actividad.estado = 'pendiente validacion';
+    actividad.fechaModificacion = new Date();
+
+    await actividad.save();
+
+    console.log("  ✅ Actividad actualizada a 'pendiente validacion'");
+    console.log("  📋 Justificación registrada");
+    console.log("  👤 Justificado por:", req.user.nombre);
+
+    // AQUÍ: Enviar notificación al coordinador
+    const coordinadores = await User.find({ 
+      rol: { $in: ['Coordinador', 'coordinador', 'Administrador', 'administrador'] },
+      activo: true 
+    });
+
+    console.log("  📧 Notificando a coordinadores:", coordinadores.length);
+
+    // Si tienes Teams configurado:
+    if (coordinadores.length > 0) {
+      const mensaje = `
+⚠️ **NUEVA JUSTIFICACIÓN DE VENCIMIENTO**
+
+📋 **Actividad:** ${actividad.actividadCatalogo}
+👤 **Líder:** ${actividad.lider}
+📦 **Proyecto:** ${actividad.proyecto}
+📅 **Fecha de Cierre:** ${new Date(actividad.fechaCierre).toLocaleDateString()}
+
+**Justificación del Líder:**
+${texto}
+
+**Asunto del correo:** ${asunto || 'No especificado'}
+
+⏳ **Estado:** Pendiente de aprobación
+
+👉 Accede a: Aprobación de Vencimientos para revisar
+      `;
+
+      try {
+        await enviarAlCanalTeams(
+          '⚠️ Nueva Justificación de Vencimiento',
+          mensaje,
+          '#FF9800'
+        );
+        console.log("  ✅ Notificación enviada a Teams");
+      } catch (err) {
+        console.log("  ⚠️ Error al enviar notificación Teams:", err.message);
+      }
+    }
+
+    res.json(actividad);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= APROBAR CIERRE DE TAREA VENCIDA (COORDINADOR) ================= */
+app.post('/actividades/:id/aprobar-cierre', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n✅ POST /actividades/:id/aprobar-cierre - User:", req.user.nombre);
+    console.log("  📤 Body recibido:", req.body);
+
+    const { comentario } = req.body;
+
+    const actividad = await Actividad.findById(req.params.id);
+
+    if (!actividad) {
+      return res.status(404).json({ error: "Actividad no encontrada" });
+    }
+
+    if (actividad.estado !== 'pendiente validacion') {
+      return res.status(400).json({ error: "La actividad no está en estado de validación" });
+    }
+
+    console.log("  ✅ Actividad encontrada:", actividad._id);
+    console.log("  👤 Aprobado por:", req.user.nombre);
+
+    // Actualizar justificación
+    actividad.justificacionCierre = {
+      ...actividad.justificacionCierre,
+      estado: 'aprobado',
+      comentarioCoordinador: comentario || 'Aprobado',
+      fecha: new Date()
+    };
+
+    // Cambiar estado a "cerrado"
+    actividad.estado = 'cerrado';
+    actividad.fechaModificacion = new Date();
+
+    await actividad.save();
+
+    console.log("  ✅ Actividad aprobada y cerrada");
+    console.log("  📝 Comentario del coordinador:", comentario);
+
+    // Notificar al líder
+    const lider = await User.findOne({ nombre: actividad.lider });
+    if (lider) {
+      console.log("  📧 Notificando al líder:", lider.nombre);
+      // Si tienes Teams:
+      try {
+        await enviarAlCanalTeams(
+          '✅ Tu justificación fue APROBADA',
+          `
+✅ **APROBACIÓN DE VENCIMIENTO**
+
+📋 **Actividad:** ${actividad.actividadCatalogo}
+📦 **Proyecto:** ${actividad.proyecto}
+
+**Decisión del Coordinador:**
+${comentario || 'Aprobado'}
+
+**Estado:** Cerrado
+          `,
+          '#4CAF50'
+        );
+      } catch (err) {
+        console.log("  ⚠️ Error al notificar Teams:", err.message);
+      }
+    }
+
+    res.json(actividad);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= RECHAZAR CIERRE DE TAREA VENCIDA (COORDINADOR) ================= */
+app.post('/actividades/:id/rechazar-cierre', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n❌ POST /actividades/:id/rechazar-cierre - User:", req.user.nombre);
+    console.log("  📤 Body recibido:", req.body);
+
+    const { comentario } = req.body;
+
+    if (!comentario || !comentario.trim()) {
+      return res.status(400).json({ error: "Debes especificar el motivo del rechazo" });
+    }
+
+    const actividad = await Actividad.findById(req.params.id);
+
+    if (!actividad) {
+      return res.status(404).json({ error: "Actividad no encontrada" });
+    }
+
+    if (actividad.estado !== 'pendiente validacion') {
+      return res.status(400).json({ error: "La actividad no está en estado de validación" });
+    }
+
+    console.log("  ✅ Actividad encontrada:", actividad._id);
+    console.log("  👤 Rechazado por:", req.user.nombre);
+    console.log("  📝 Motivo:", comentario);
+
+    // Actualizar justificación
+    actividad.justificacionCierre = {
+      ...actividad.justificacionCierre,
+      estado: 'rechazado',
+      comentarioCoordinador: comentario,
+      fecha: new Date()
+    };
+
+    // Volver a estado "en progreso" para que el líder reintente
+    actividad.estado = 'en progreso';
+    actividad.fechaModificacion = new Date();
+
+    await actividad.save();
+
+    console.log("  ✅ Actividad rechazada - volviendo a 'en progreso'");
+
+    // Notificar al líder
+    const lider = await User.findOne({ nombre: actividad.lider });
+    if (lider) {
+      console.log("  📧 Notificando al líder:", lider.nombre);
+      try {
+        await enviarAlCanalTeams(
+          '❌ Tu justificación fue RECHAZADA',
+          `
+❌ **RECHAZO DE JUSTIFICACIÓN**
+
+📋 **Actividad:** ${actividad.actividadCatalogo}
+📦 **Proyecto:** ${actividad.proyecto}
+
+**Motivo del Rechazo:**
+${comentario}
+
+⏳ **Acción requerida:** Debes reenviar una justificación mejorada
+
+👉 Accede a: Mis Actividades para reenviar la justificación
+          `,
+          '#CC0000'
+        );
+      } catch (err) {
+        console.log("  ⚠️ Error al notificar Teams:", err.message);
+      }
+    }
+
+    res.json(actividad);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* ================= RESUMEN CONSOLIDADO DE TAREAS - TEAMS ================= */
 app.post('/resumen-consolidado-tareas', async (req, res) => {
   try {
