@@ -102,7 +102,15 @@ const actividadSchema = new mongoose.Schema({
     usuario: String,
     rol: String,
     horas: { type: Number, default: 0 }
-  }]
+  }],
+  justificacionCierre: {
+    texto: String,
+    usuario: String,
+    fecha: Date,
+    asunto: String,
+    estado: { type: String, enum: ['pendiente', 'aprobado', 'rechazado'] },
+    comentarioCoordinador: String
+  }
 });
 
 const Actividad = mongoose.model('Actividad', actividadSchema, 'actividades');
