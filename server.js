@@ -594,7 +594,11 @@ app.patch('/catalogo/:id/aprobar', auth, esCoordinadorOAdmin, async (req, res) =
 
     const item = await Catalogo.findByIdAndUpdate(
       req.params.id,
-      { estado: 'oficial' },
+      { 
+        estado: 'oficial',
+        esHistorico: true,
+        estadoHistorico: 'aprobado'
+      },
       { new: true }
     );
 
@@ -621,7 +625,12 @@ app.patch('/catalogo/:id/rechazar', auth, esCoordinadorOAdmin, async (req, res) 
 
     const item = await Catalogo.findByIdAndUpdate(
       req.params.id,
-      { activo: false, observaciones },
+      { 
+        activo: false,
+        observaciones,
+        esHistorico: true,
+        estadoHistorico: 'rechazado'
+      },
       { new: true }
     );
 
@@ -669,29 +678,12 @@ app.get('/catalogo/historico', auth, esCoordinadorOAdmin, async (req, res) => {
     console.log("  📤 Query params:", req.query);
 
     const { estado, sugeridoPor } = req.query;
-    let filtro = {};
+    let filtro = { esHistorico: true };  // ← IMPORTANTE: Solo mostrar histórico
 
-    // Filtrar por estado (aprobado o rechazado basado en lo que viene del query)
+    // Filtrar por estado
     if (estado && estado !== 'todos') {
-      if (estado === 'aprobado') {
-        // Aprobados son los que tienen estado: 'oficial' y activo: true
-        filtro.estado = 'oficial';
-        filtro.activo = true;
-        console.log("  🔍 Buscando APROBADOS");
-      } else if (estado === 'rechazado') {
-        // Rechazados son los que tienen activo: false
-        filtro.activo = false;
-        console.log("  🔍 Buscando RECHAZADOS");
-      }
-    } else {
-      // Si no hay filtro de estado, mostrar todos los procesados (aprobados + rechazados)
-      filtro = {
-        $or: [
-          { estado: 'oficial', activo: true },
-          { activo: false }
-        ]
-      };
-      console.log("  🔍 Mostrando TODOS");
+      filtro.estadoHistorico = estado;
+      console.log("  🔍 Filtrando por estado:", estado);
     }
 
     if (sugeridoPor) {
@@ -699,10 +691,11 @@ app.get('/catalogo/historico', auth, esCoordinadorOAdmin, async (req, res) => {
       console.log("  🔍 Filtrado por sugeridor:", sugeridoPor);
     }
 
+    console.log("  📋 Filtro BD:", JSON.stringify(filtro));
+
     const historico = await Catalogo.find(filtro).sort({ fechaSugerencia: -1 });
 
-    console.log("  ✅ Registros de histórico encontrados:", historico.length);
-    console.log("  📋 Filtro usado:", JSON.stringify(filtro));
+    console.log("  ✅ Registros encontrados:", historico.length);
     
     res.json(historico);
   } catch (err) {
@@ -716,15 +709,15 @@ app.get('/catalogo/historico-stats', auth, esCoordinadorOAdmin, async (req, res)
   try {
     console.log("\n📊 GET /catalogo/historico-stats - User:", req.user.nombre);
 
-    const total = await Catalogo.countDocuments({ 
-      $or: [
-        { estado: 'oficial', activo: true },  // Aprobados
-        { activo: false }  // Rechazados
-      ]
+    const total = await Catalogo.countDocuments({ esHistorico: true });
+    const aprobados = await Catalogo.countDocuments({ 
+      esHistorico: true,
+      estadoHistorico: 'aprobado'
     });
-
-    const aprobados = await Catalogo.countDocuments({ estado: 'oficial', activo: true });
-    const rechazados = await Catalogo.countDocuments({ activo: false });
+    const rechazados = await Catalogo.countDocuments({ 
+      esHistorico: true,
+      estadoHistorico: 'rechazado'
+    });
 
     console.log("  ✅ Estadísticas calculadas");
 
