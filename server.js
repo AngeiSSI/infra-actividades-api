@@ -517,7 +517,7 @@ app.get('/catalogo/todos', auth, esCoordinadorOAdmin, async (req, res) => {
     console.log("  ✅ Catálogo completo enviado:", lista.length, "items");
     res.json(lista);
   } catch (err) {
-    console.error("  ❌ Error:", err.message);
+    console.error("  �� Error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -654,6 +654,67 @@ app.delete('/catalogo/:id', auth, esCoordinadorOAdmin, async (req, res) => {
 
     console.log("  ✅ Catálogo eliminado (desactivado):", item._id);
     res.json({ mensaje: "Catálogo eliminado correctamente" });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= CATÁLOGO - HISTÓRICO ================= */
+app.get('/catalogo/historico', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n📊 GET /catalogo/historico - User:", req.user.nombre);
+
+    const { estado, sugeridoPor } = req.query;
+    let filtro = {};
+
+    // Filtrar por estado (aprobado = oficial y activo, rechazado = activo: false)
+    if (estado && estado !== 'todos') {
+      if (estado === 'aprobado') {
+        filtro.estado = 'oficial';
+        filtro.activo = true;
+      } else if (estado === 'rechazado') {
+        filtro.activo = false;
+      }
+    }
+
+    if (sugeridoPor) {
+      filtro.sugeridoPor = sugeridoPor;
+    }
+
+    const historico = await Catalogo.find(filtro).sort({ fechaSugerencia: -1 });
+
+    console.log("  ✅ Registros de histórico encontrados:", historico.length);
+    res.json(historico);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= CATÁLOGO - ESTADÍSTICAS DEL HISTÓRICO ================= */
+app.get('/catalogo/historico-stats', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n📊 GET /catalogo/historico-stats - User:", req.user.nombre);
+
+    const total = await Catalogo.countDocuments({ 
+      $or: [
+        { estado: 'oficial', activo: true },  // Aprobados
+        { activo: false }  // Rechazados
+      ]
+    });
+
+    const aprobados = await Catalogo.countDocuments({ estado: 'oficial', activo: true });
+    const rechazados = await Catalogo.countDocuments({ activo: false });
+
+    console.log("  ✅ Estadísticas calculadas");
+
+    res.json({
+      total,
+      aprobados,
+      rechazados,
+      porcentajeAprobacion: total > 0 ? ((aprobados / total) * 100).toFixed(2) : 0
+    });
   } catch (err) {
     console.error("  ❌ Error:", err.message);
     res.status(500).json({ error: err.message });
@@ -1519,8 +1580,6 @@ app.post('/asignaciones', auth, async (req, res) => {
   }
 });
 
-// ... (todo lo anterior que ya tiene)
-
 /* ================= ASIGNACIONES - PUT (Actualizar) ================= */
 app.put('/asignaciones/:id', auth, async (req, res) => {
   try {
@@ -1594,5 +1653,3 @@ app.listen(port, () => {
   console.log("🔐 JWT_SECRET:", SECRET);
   console.log("📊 MONGO_URI:", process.env.MONGO_URI ? "✅ Configurado" : "❌ NO Configurado");
 });
-
-                  
