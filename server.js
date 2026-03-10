@@ -678,24 +678,32 @@ app.get('/catalogo/historico', auth, esCoordinadorOAdmin, async (req, res) => {
     console.log("  📤 Query params:", req.query);
 
     const { estado, sugeridoPor } = req.query;
-    let filtro = { esHistorico: true };  // ← IMPORTANTE: Solo mostrar histórico
+    let filtro = { esHistorico: true };
 
     // Filtrar por estado
     if (estado && estado !== 'todos') {
       filtro.estadoHistorico = estado;
-      console.log("  🔍 Filtrando por estado:", estado);
+      console.log("  🔍 Filtrando BD por estadoHistorico:", estado);
     }
 
     if (sugeridoPor) {
       filtro.sugeridoPor = sugeridoPor;
-      console.log("  🔍 Filtrado por sugeridor:", sugeridoPor);
+      console.log("  🔍 Filtrando BD por sugeridor:", sugeridoPor);
     }
 
-    console.log("  📋 Filtro BD:", JSON.stringify(filtro));
+    console.log("  📋 Filtro MongoDB:", JSON.stringify(filtro));
 
     const historico = await Catalogo.find(filtro).sort({ fechaSugerencia: -1 });
 
-    console.log("  ✅ Registros encontrados:", historico.length);
+    console.log("  ✅ Total registros encontrados en BD:", historico.length);
+    
+    // Debug: mostrar los primeros 3 registros
+    if (historico.length > 0) {
+      console.log("  📋 Primeros registros:");
+      historico.slice(0, 3).forEach((item, idx) => {
+        console.log(`     [${idx}] Actividad: ${item.actividad}, Estado: ${item.estadoHistorico}, Histórico: ${item.esHistorico}`);
+      });
+    }
     
     res.json(historico);
   } catch (err) {
