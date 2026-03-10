@@ -664,27 +664,44 @@ app.delete('/catalogo/:id', auth, esCoordinadorOAdmin, async (req, res) => {
 app.get('/catalogo/historico', auth, esCoordinadorOAdmin, async (req, res) => {
   try {
     console.log("\n📊 GET /catalogo/historico - User:", req.user.nombre);
+    console.log("  📤 Query params:", req.query);
 
     const { estado, sugeridoPor } = req.query;
     let filtro = {};
 
-    // Filtrar por estado (aprobado = oficial y activo, rechazado = activo: false)
+    // Filtrar por estado (aprobado o rechazado basado en lo que viene del query)
     if (estado && estado !== 'todos') {
       if (estado === 'aprobado') {
+        // Aprobados son los que tienen estado: 'oficial' y activo: true
         filtro.estado = 'oficial';
         filtro.activo = true;
+        console.log("  🔍 Buscando APROBADOS");
       } else if (estado === 'rechazado') {
+        // Rechazados son los que tienen activo: false
         filtro.activo = false;
+        console.log("  🔍 Buscando RECHAZADOS");
       }
+    } else {
+      // Si no hay filtro de estado, mostrar todos los procesados (aprobados + rechazados)
+      filtro = {
+        $or: [
+          { estado: 'oficial', activo: true },
+          { activo: false }
+        ]
+      };
+      console.log("  🔍 Mostrando TODOS");
     }
 
     if (sugeridoPor) {
       filtro.sugeridoPor = sugeridoPor;
+      console.log("  🔍 Filtrado por sugeridor:", sugeridoPor);
     }
 
     const historico = await Catalogo.find(filtro).sort({ fechaSugerencia: -1 });
 
     console.log("  ✅ Registros de histórico encontrados:", historico.length);
+    console.log("  📋 Filtro usado:", JSON.stringify(filtro));
+    
     res.json(historico);
   } catch (err) {
     console.error("  ❌ Error:", err.message);
