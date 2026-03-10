@@ -77,7 +77,9 @@ const catalogoSchema = new mongoose.Schema({
   fechaSugerencia: { type: Date, default: Date.now },
   fechaCreacion: { type: Date, default: Date.now },
   observaciones: String,
-  activo: { type: Boolean, default: true }
+  activo: { type: Boolean, default: true },
+  esHistorico: { type: Boolean, default: false },  // ← NUEVO
+  estadoHistorico: { type: String, enum: ['aprobado', 'rechazado'], default: null }  // ← NUEVO
 });
 
 const Catalogo = mongoose.model('Catalogo', catalogoSchema, 'catalogos');
