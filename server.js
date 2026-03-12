@@ -1043,12 +1043,14 @@ app.put('/actividades/:id/cerrar', auth, async (req, res) => {
       return res.status(400).json({ error: "No se puede cerrar sin observación del día de hoy" });
     }
 
-    actividad.estado = "cerrado";
+    const fechaCierreStr = actividad.fechaCierre && new Date(actividad.fechaCierre).toISOString().split('T')[0];
+    const estaVencida = fechaCierreStr && new Date(hoyString) > new Date(fechaCierreStr);
+    actividad.estado = estaVencida ? "cerrada_vencida" : "cerrado";
 
     await actividad.save();
 
     console.log("  ✅ Actividad cerrada");
-    console.log("  📅 Estado actualizado a: cerrado");
+    console.log("  📅 Estado actualizado a:", actividad.estado);
 
     res.json(actividad);
   } catch (err) {
@@ -1080,12 +1082,14 @@ app.post('/actividades/:id/cerrar', auth, async (req, res) => {
       return res.status(400).json({ error: "No se puede cerrar sin observación del día de hoy" });
     }
 
-    actividad.estado = "cerrado";
+    const fechaCierreStr = actividad.fechaCierre && new Date(actividad.fechaCierre).toISOString().split('T')[0];
+    const estaVencida = fechaCierreStr && new Date(hoyString) > new Date(fechaCierreStr);
+    actividad.estado = estaVencida ? "cerrada_vencida" : "cerrado";
 
     await actividad.save();
 
     console.log("  ✅ Actividad cerrada");
-    console.log("  📅 Estado actualizado a: cerrado");
+    console.log("  📅 Estado actualizado a:", actividad.estado);
 
     res.json(actividad);
   } catch (err) {
