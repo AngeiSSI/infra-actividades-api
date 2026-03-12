@@ -276,6 +276,14 @@ function calcularProgreso(actividad) {
   return (hoy - inicio) / (fin - inicio);
 }
 
+function resolverEstadoCierre(fechaCierre) {
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  const fechaCierreNormalizada = new Date(fechaCierre);
+  fechaCierreNormalizada.setHours(0, 0, 0, 0);
+  return hoy > fechaCierreNormalizada ? "cerrada_vencida" : "cerrado";
+}
+
 /* ================= LOGIN ================= */
 app.post('/login', async (req, res) => {
   console.log("\n🔓 POST /login");
@@ -1043,12 +1051,12 @@ app.put('/actividades/:id/cerrar', auth, async (req, res) => {
       return res.status(400).json({ error: "No se puede cerrar sin observación del día de hoy" });
     }
 
-    actividad.estado = "cerrado";
+    actividad.estado = resolverEstadoCierre(actividad.fechaCierre);
 
     await actividad.save();
 
     console.log("  ✅ Actividad cerrada");
-    console.log("  📅 Estado actualizado a: cerrado");
+    console.log("  📅 Estado actualizado a:", actividad.estado);
 
     res.json(actividad);
   } catch (err) {
@@ -1080,12 +1088,12 @@ app.post('/actividades/:id/cerrar', auth, async (req, res) => {
       return res.status(400).json({ error: "No se puede cerrar sin observación del día de hoy" });
     }
 
-    actividad.estado = "cerrado";
+    actividad.estado = resolverEstadoCierre(actividad.fechaCierre);
 
     await actividad.save();
 
     console.log("  ✅ Actividad cerrada");
-    console.log("  📅 Estado actualizado a: cerrado");
+    console.log("  📅 Estado actualizado a:", actividad.estado);
 
     res.json(actividad);
   } catch (err) {
