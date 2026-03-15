@@ -264,6 +264,13 @@ function sumarDiasHabiles(fecha, dias) {
   return resultado;
 }
 
+function resolverEstadoCierre(fechaCierre) {
+  if (!fechaCierre) return "cerrado";
+  const hoyStr = new Date().toISOString().split('T')[0];
+  const cierreStr = new Date(fechaCierre).toISOString().split('T')[0];
+  return hoyStr > cierreStr ? "cerrada_vencida" : "cerrado";
+}
+
 function calcularProgreso(actividad) {
   if (!actividad.fechaCierre) return 0;
 
@@ -1043,9 +1050,7 @@ app.put('/actividades/:id/cerrar', auth, async (req, res) => {
       return res.status(400).json({ error: "No se puede cerrar sin observación del día de hoy" });
     }
 
-    const fechaCierreStr = actividad.fechaCierre && new Date(actividad.fechaCierre).toISOString().split('T')[0];
-    const estaVencida = fechaCierreStr && new Date(hoyString) > new Date(fechaCierreStr);
-    actividad.estado = estaVencida ? "cerrada_vencida" : "cerrado";
+    actividad.estado = resolverEstadoCierre(actividad.fechaCierre);
 
     await actividad.save();
 
@@ -1082,9 +1087,7 @@ app.post('/actividades/:id/cerrar', auth, async (req, res) => {
       return res.status(400).json({ error: "No se puede cerrar sin observación del día de hoy" });
     }
 
-    const fechaCierreStr = actividad.fechaCierre && new Date(actividad.fechaCierre).toISOString().split('T')[0];
-    const estaVencida = fechaCierreStr && new Date(hoyString) > new Date(fechaCierreStr);
-    actividad.estado = estaVencida ? "cerrada_vencida" : "cerrado";
+    actividad.estado = resolverEstadoCierre(actividad.fechaCierre);
 
     await actividad.save();
 
