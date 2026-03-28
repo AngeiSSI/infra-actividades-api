@@ -79,8 +79,8 @@ const catalogoSchema = new mongoose.Schema({
   fechaCreacion: { type: Date, default: Date.now },
   observaciones: String,
   activo: { type: Boolean, default: true },
-  esHistorico: { type: Boolean, default: false },  // ← NUEVO
-  estadoHistorico: { type: String, enum: ['aprobado', 'rechazado'], default: null }  // ← NUEVO
+  esHistorico: { type: Boolean, default: false },
+  estadoHistorico: { type: String, enum: ['aprobado', 'rechazado'], default: null }
 });
 
 const Catalogo = mongoose.model('Catalogo', catalogoSchema, 'catalogos');
@@ -207,8 +207,16 @@ function auth(req, res, next) {
 
 function esCoordinadorOAdmin(req, res, next) {
   const rol = req.user?.rol?.toLowerCase();
-  if (rol !== 'coordinador' && rol !== 'administrador') {
+  if (rol !== 'coordinador' && rol !== 'administrador' && rol !== 'super_admin') {
     return res.status(403).json({ error: "Acceso denegado - requiere permisos de Coordinador o Administrador" });
+  }
+  next();
+}
+
+function esSuperAdmin(req, res, next) {
+  const rol = req.user?.rol?.toLowerCase();
+  if (rol !== 'super_admin') {
+    return res.status(403).json({ error: "Acceso denegado - requiere permisos de Super Admin" });
   }
   next();
 }
@@ -287,14 +295,6 @@ function calcularProgreso(actividad) {
   if (hoy >= fin) return 1;
 
   return (hoy - inicio) / (fin - inicio);
-}
-
-function resolverEstadoCierre(fechaCierre) {
-  const hoy = new Date();
-  hoy.setHours(0, 0, 0, 0);
-  const fechaCierreNormalizada = new Date(fechaCierre);
-  fechaCierreNormalizada.setHours(0, 0, 0, 0);
-  return hoy > fechaCierreNormalizada ? "cerrada_vencida" : "cerrado";
 }
 
 /* ================= LOGIN ================= */
@@ -540,7 +540,7 @@ app.get('/catalogo/todos', auth, esCoordinadorOAdmin, async (req, res) => {
     console.log("  ✅ Catálogo completo enviado:", lista.length, "items");
     res.json(lista);
   } catch (err) {
-    console.error("  �� Error:", err.message);
+    console.error("  ❌ Error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -558,7 +558,7 @@ app.post('/catalogo', auth, async (req, res) => {
     }
 
     const rol = req.user.rol?.toLowerCase();
-    const esAutorizado = rol === 'coordinador' || rol === 'administrador';
+    const esAutorizado = rol === 'coordinador' || rol === 'administrador' || rol === 'super_admin';
 
     const nuevoItem = await Catalogo.create({
       tipificacion,
@@ -701,7 +701,6 @@ app.get('/catalogo/historico', auth, esCoordinadorOAdmin, async (req, res) => {
     const { estado, sugeridoPor } = req.query;
     let filtro = { esHistorico: true };
 
-    // Filtrar por estado
     if (estado && estado !== 'todos') {
       filtro.estadoHistorico = estado;
       console.log("  🔍 Filtrando BD por estadoHistorico:", estado);
@@ -718,7 +717,6 @@ app.get('/catalogo/historico', auth, esCoordinadorOAdmin, async (req, res) => {
 
     console.log("  ✅ Total registros encontrados en BD:", historico.length);
     
-    // Debug: mostrar los primeros 3 registros
     if (historico.length > 0) {
       console.log("  📋 Primeros registros:");
       historico.slice(0, 3).forEach((item, idx) => {
@@ -986,6 +984,44 @@ app.post('/actividades', auth, async (req, res) => {
   }
 });
 
+/* ================= ACTUALIZAR ACTIVIDAD (SOLO SUPER ADMIN) ================= */
+app.put('/actividades/:id', auth, esSuperAdmin, async (req, res) => {
+  try {
+    console.log("\n✏️ PUT /actividades/:id - User:", req.user.nombre);
+    console.log("  📤 Datos recibidos:", req.body);
+    console.log("  📤 ID de actividad:", req.params.id);
+
+    const { fechaCierre } = req.body;
+
+    if (!fechaCierre) {
+      return res.status(400).json({ error: "fechaCierre es requerida" });
+    }
+
+    const actividad = await Actividad.findByIdAndUpdate(
+      req.params.id,
+      {
+        fechaCierre: new Date(fechaCierre),
+        fechaModificacion: new Date()
+      },
+      { new: true, runValidators: false }
+    );
+
+    if (!actividad) {
+      console.log("  ❌ Actividad no encontrada con ID:", req.params.id);
+      return res.status(404).json({ error: "Actividad no encontrada" });
+    }
+
+    console.log("  ✅ Actividad actualizada:", actividad._id);
+    console.log("  📅 Nueva fechaCierre:", actividad.fechaCierre);
+    console.log("  📅 fechaModificacion:", actividad.fechaModificacion);
+
+    res.json(actividad);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* ================= OBSERVACIONES ================= */
 app.post('/actividades/:id/observaciones', auth, async (req, res) => {
   try {
@@ -1033,43 +1069,6 @@ app.post('/actividades/:id/observaciones', auth, async (req, res) => {
     console.log("  ✅ Actividad guardada");
     console.log("  📋 Observaciones guardadas:", actividad.observaciones.length);
     console.log("  📋 Última observación guardada:", actividad.observaciones[actividad.observaciones.length - 1]);
-
-    res.json(actividad);
-  } catch (err) {
-    console.error("  ❌ Error:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/* ================= CERRAR ACTIVIDAD (PUT) ================= */
-app.put('/actividades/:id/cerrar', auth, async (req, res) => {
-  try {
-    console.log("\n🔒 PUT /actividades/:id/cerrar - User:", req.user.nombre);
-
-    const actividad = await Actividad.findById(req.params.id);
-
-    if (!actividad) {
-      return res.status(404).json({ error: "Actividad no encontrada" });
-    }
-
-    const hoy = new Date();
-    const hoyString = hoy.toISOString().split('T')[0];
-
-    const tieneObservacionHoy = actividad.observaciones?.some(obs => {
-      const fechaObs = new Date(obs.fecha).toISOString().split('T')[0];
-      return fechaObs === hoyString;
-    });
-
-    if (!tieneObservacionHoy) {
-      return res.status(400).json({ error: "No se puede cerrar sin observación del día de hoy" });
-    }
-
-    actividad.estado = resolverEstadoCierre(actividad.fechaCierre);
-
-    await actividad.save();
-
-    console.log("  ✅ Actividad cerrada");
-    console.log("  📅 Estado actualizado a:", actividad.estado);
 
     res.json(actividad);
   } catch (err) {
@@ -1136,7 +1135,6 @@ app.post('/actividades/:id/validar-cierre', auth, async (req, res) => {
     console.log("  ✅ Actividad encontrada:", actividad._id);
     console.log("  👤 Usuario justificando:", req.user.nombre);
 
-    // Crear la justificación
     actividad.justificacionCierre = {
       texto: texto.trim(),
       usuario: req.user.nombre,
@@ -1145,7 +1143,6 @@ app.post('/actividades/:id/validar-cierre', auth, async (req, res) => {
       estado: 'pendiente'
     };
 
-    // Cambiar estado a "pendiente validacion"
     actividad.estado = 'pendiente validacion';
     actividad.fechaModificacion = new Date();
 
@@ -1155,15 +1152,13 @@ app.post('/actividades/:id/validar-cierre', auth, async (req, res) => {
     console.log("  📋 Justificación registrada");
     console.log("  👤 Justificado por:", req.user.nombre);
 
-    // AQUÍ: Enviar notificación al coordinador
     const coordinadores = await User.find({ 
-      rol: { $in: ['Coordinador', 'coordinador', 'Administrador', 'administrador'] },
+      rol: { $in: ['Coordinador', 'coordinador', 'Administrador', 'administrador', 'Super Admin', 'super_admin'] },
       activo: true 
     });
 
     console.log("  📧 Notificando a coordinadores:", coordinadores.length);
 
-    // Si tienes Teams configurado:
     if (coordinadores.length > 0) {
       const mensaje = `
 ⚠️ **NUEVA JUSTIFICACIÓN DE VENCIMIENTO**
@@ -1223,7 +1218,6 @@ app.post('/actividades/:id/aprobar-cierre', auth, esCoordinadorOAdmin, async (re
     console.log("  ✅ Actividad encontrada:", actividad._id);
     console.log("  👤 Aprobado por:", req.user.nombre);
 
-    // Guardar en historial ANTES de cambiar el estado
     const registroHistorial = await Historial.create({
       actividadId: actividad._id,
       lider: actividad.lider,
@@ -1248,7 +1242,6 @@ app.post('/actividades/:id/aprobar-cierre', auth, esCoordinadorOAdmin, async (re
 
     console.log("  📋 Registro en historial creado:", registroHistorial._id);
 
-    // Actualizar justificación
     actividad.justificacionCierre = {
       ...actividad.justificacionCierre,
       estado: 'aprobado',
@@ -1256,7 +1249,6 @@ app.post('/actividades/:id/aprobar-cierre', auth, esCoordinadorOAdmin, async (re
       fecha: new Date()
     };
 
-    // Cambiar estado a "cerrado"
     actividad.estado = 'cerrada_vencida';
     actividad.fechaModificacion = new Date();
 
@@ -1265,7 +1257,6 @@ app.post('/actividades/:id/aprobar-cierre', auth, esCoordinadorOAdmin, async (re
     console.log("  ✅ Actividad aprobada y cerrada");
     console.log("  📝 Comentario del coordinador:", comentario);
 
-    // Notificar al líder
     const lider = await User.findOne({ nombre: actividad.lider });
     if (lider) {
       console.log("  📧 Notificando al líder:", lider.nombre);
@@ -1324,7 +1315,6 @@ app.post('/actividades/:id/rechazar-cierre', auth, esCoordinadorOAdmin, async (r
     console.log("  👤 Rechazado por:", req.user.nombre);
     console.log("  📝 Motivo:", comentario);
 
-    // Guardar en historial ANTES de cambiar el estado
     const registroHistorial = await Historial.create({
       actividadId: actividad._id,
       lider: actividad.lider,
@@ -1349,7 +1339,6 @@ app.post('/actividades/:id/rechazar-cierre', auth, esCoordinadorOAdmin, async (r
 
     console.log("  📋 Registro en historial creado:", registroHistorial._id);
 
-    // Actualizar justificación
     actividad.justificacionCierre = {
       ...actividad.justificacionCierre,
       estado: 'rechazado',
@@ -1357,7 +1346,6 @@ app.post('/actividades/:id/rechazar-cierre', auth, esCoordinadorOAdmin, async (r
       fecha: new Date()
     };
 
-    // Volver a estado "en progreso" para que el líder reintente
     actividad.estado = 'en progreso';
     actividad.fechaModificacion = new Date();
 
@@ -1365,7 +1353,6 @@ app.post('/actividades/:id/rechazar-cierre', auth, esCoordinadorOAdmin, async (r
 
     console.log("  ✅ Actividad rechazada - volviendo a 'en progreso'");
 
-    // Notificar al líder
     const lider = await User.findOne({ nombre: actividad.lider });
     if (lider) {
       console.log("  📧 Notificando al líder:", lider.nombre);
@@ -1601,7 +1588,7 @@ app.post('/asignaciones', auth, async (req, res) => {
     console.log("  📤 Datos recibidos:", req.body);
 
     const rol = req.user.rol?.toLowerCase();
-    const esAutorizado = rol === 'administrador' || rol === 'coordinador' || rol === 'senior';
+    const esAutorizado = rol === 'administrador' || rol === 'coordinador' || rol === 'senior' || rol === 'super_admin';
 
     if (!esAutorizado) {
       return res.status(403).json({ error: "No tienes permisos para crear asignaciones" });
@@ -1628,7 +1615,7 @@ app.put('/asignaciones/:id', auth, async (req, res) => {
     console.log("  📤 Datos recibidos:", req.body);
 
     const rol = req.user.rol?.toLowerCase();
-    const esAutorizado = rol === 'administrador' || rol === 'coordinador' || rol === 'senior';
+    const esAutorizado = rol === 'administrador' || rol === 'coordinador' || rol === 'senior' || rol === 'super_admin';
 
     if (!esAutorizado) {
       return res.status(403).json({ error: "No tienes permisos para editar asignaciones" });
@@ -1658,7 +1645,7 @@ app.delete('/asignaciones/:id', auth, async (req, res) => {
     console.log("\n🗑️ DELETE /asignaciones/:id - User:", req.user.nombre);
 
     const rol = req.user.rol?.toLowerCase();
-    const esAutorizado = rol === 'administrador' || rol === 'coordinador' || rol === 'senior';
+    const esAutorizado = rol === 'administrador' || rol === 'coordinador' || rol === 'senior' || rol === 'super_admin';
 
     if (!esAutorizado) {
       return res.status(403).json({ error: "No tienes permisos para eliminar asignaciones" });
