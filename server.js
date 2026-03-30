@@ -273,6 +273,58 @@ function sumarDiasHabiles(fecha, dias) {
   return resultado;
 }
 
+async function ajustarADiaHabil(fecha) {
+  let fechaAjustada = new Date(fecha);
+  fechaAjustada.setHours(0, 0, 0, 0);
+
+  let intentos = 0;
+  const maxIntentos = 100;
+
+  while (intentos < maxIntentos) {
+    const diaSemana = fechaAjustada.getDay();
+    
+    // Si es fin de semana
+    if (diaSemana === 6) {
+      // Sábado -> sumar 2 días (lunes)
+      fechaAjustada.setDate(fechaAjustada.getDate() + 2);
+      intentos++;
+      continue;
+    }
+    
+    if (diaSemana === 0) {
+      // Domingo -> sumar 1 día (lunes)
+      fechaAjustada.setDate(fechaAjustada.getDate() + 1);
+      intentos++;
+      continue;
+    }
+
+    // Si es entre lunes-viernes, verificar si es festivo
+    try {
+      const fechaStr = fechaAjustada.toISOString().split('T')[0];
+      const festivo = await mongoose.connection.collection('festivos').findOne({
+        fecha: {
+          $gte: new Date(fechaStr + 'T00:00:00Z'),
+          $lt: new Date(fechaStr + 'T23:59:59Z')
+        }
+      });
+
+      if (festivo) {
+        // Es feriado, sumar 1 día
+        fechaAjustada.setDate(fechaAjustada.getDate() + 1);
+        intentos++;
+        continue;
+      }
+    } catch (error) {
+      console.error('Error verificando feriado:', error);
+    }
+
+    // Es un día hábil válido
+    break;
+  }
+
+  return fechaAjustada;
+}
+
 function resolverEstadoCierre(fechaCierre) {
   if (!fechaCierre) return "cerrado";
 
@@ -984,7 +1036,7 @@ app.post('/actividades', auth, async (req, res) => {
   }
 });
 
-/* ================= ACTUALIZAR ACTIVIDAD (SOLO SUPER ADMIN) ================= */
+/* ================= ACTUALIZAR ACTIVIDAD (SOLO SUPER ADMIN) - CON AJUSTE A DÍA HÁBIL ================= */
 app.put('/actividades/:id', auth, esSuperAdmin, async (req, res) => {
   try {
     console.log("\n✏️ PUT /actividades/:id - User:", req.user.nombre);
@@ -997,10 +1049,21 @@ app.put('/actividades/:id', auth, esSuperAdmin, async (req, res) => {
       return res.status(400).json({ error: "fechaCierre es requerida" });
     }
 
+    // Convertir fecha y ajustar a día hábil
+    let fechaAjustada = new Date(fechaCierre);
+    fechaAjustada.setHours(0, 0, 0, 0);
+
+    console.log("  📅 Fecha original seleccionada:", fechaAjustada.toISOString().split('T')[0]);
+
+    // Ajustar a día hábil
+    fechaAjustada = await ajustarADiaHabil(fechaAjustada);
+
+    console.log("  📅 Fecha ajustada a día hábil:", fechaAjustada.toISOString().split('T')[0]);
+
     const actividad = await Actividad.findByIdAndUpdate(
       req.params.id,
       {
-        fechaCierre: new Date(fechaCierre),
+        fechaCierre: fechaAjustada,
         fechaModificacion: new Date()
       },
       { new: true, runValidators: false }
@@ -1012,10 +1075,14 @@ app.put('/actividades/:id', auth, esSuperAdmin, async (req, res) => {
     }
 
     console.log("  ✅ Actividad actualizada:", actividad._id);
-    console.log("  📅 Nueva fechaCierre:", actividad.fechaCierre);
+    console.log("  📅 Nueva fechaCierre (ajustada):", actividad.fechaCierre);
     console.log("  📅 fechaModificacion:", actividad.fechaModificacion);
 
-    res.json(actividad);
+    res.json({
+      ...actividad.toObject(),
+      mensaje: `Fecha ajustada al próximo día hábil: ${actividad.fechaCierre.toLocaleDateString('es-CO')}`
+    });
+
   } catch (err) {
     console.error("  ❌ Error:", err.message);
     res.status(500).json({ error: err.message });
