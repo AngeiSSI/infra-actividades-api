@@ -274,22 +274,23 @@ function sumarDiasHabiles(fecha, dias) {
 }
 
 async function ajustarADiaHabil(fecha) {
-  // La fecha llega como ISO string. Necesitamos trabajar en zona local
-  let fechaAjustada = new Date(fecha);
-  
-  // Obtener componentes UTC
-  const utcYear = fechaAjustada.getUTCFullYear();
-  const utcMonth = fechaAjustada.getUTCMonth();
-  const utcDate = fechaAjustada.getUTCDate();
-  
-  // IMPORTANTE: Crear fecha en zona LOCAL (no UTC) con esos componentes
-  let fechaLocal = new Date(utcYear, utcMonth, utcDate, 0, 0, 0, 0);
-  
   console.log("  🔍 AJUSTE A DÍA HÁBIL:");
   console.log("  📥 Entrada (ISO):", fecha);
+
+  // Parsear el ISO string "2026-04-04T00:00:00Z"
+  const fechaDate = new Date(fecha);
+  
+  // Extraer componentes en UTC
+  const utcYear = fechaDate.getUTCFullYear();
+  const utcMonth = fechaDate.getUTCMonth();
+  const utcDate = fechaDate.getUTCDate();
+  
+  // Crear fecha en zona LOCAL con esos componentes
+  let fechaLocal = new Date(utcYear, utcMonth, utcDate, 0, 0, 0, 0);
+  
   console.log("  📅 Componentes UTC: año=" + utcYear + ", mes=" + (utcMonth + 1) + ", día=" + utcDate);
   console.log("  📅 Fecha LOCAL reconstruida:", fechaLocal.toLocaleDateString('es-CO'));
-  console.log("  📅 Día semana (0=Dom):", fechaLocal.getDay());
+  console.log("  📅 Día semana (0=Dom, 6=Sab):", fechaLocal.getDay());
 
   let intentos = 0;
   const maxIntentos = 100;
@@ -349,9 +350,15 @@ async function ajustarADiaHabil(fecha) {
     break;
   }
 
-  console.log("  📤 Salida (ISO string):", fechaLocal.toISOString());
+  // Convertir de vuelta a ISO string sin perder el día
+  const year_str = String(fechaLocal.getFullYear()).padStart(4, '0');
+  const month_str = String(fechaLocal.getMonth() + 1).padStart(2, '0');
+  const day_str = String(fechaLocal.getDate()).padStart(2, '0');
+  const isoFinal = `${year_str}-${month_str}-${day_str}T00:00:00Z`;
   
-  return fechaLocal;
+  console.log("  📤 Salida (ISO string):", isoFinal);
+  
+  return new Date(isoFinal);
 }
 
 function resolverEstadoCierre(fechaCierre) {
