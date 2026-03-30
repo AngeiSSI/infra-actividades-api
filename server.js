@@ -274,45 +274,55 @@ function sumarDiasHabiles(fecha, dias) {
 }
 
 async function ajustarADiaHabil(fecha) {
-  // La fecha llega como ISO string, la convertimos a fecha local
+  // La fecha llega como ISO string. Necesitamos trabajar en zona local
   let fechaAjustada = new Date(fecha);
   
-  // Establecer a medianoche en zona local
-  fechaAjustada.setHours(0, 0, 0, 0);
+  // Obtener componentes UTC
+  const utcYear = fechaAjustada.getUTCFullYear();
+  const utcMonth = fechaAjustada.getUTCMonth();
+  const utcDate = fechaAjustada.getUTCDate();
+  
+  // IMPORTANTE: Crear fecha en zona LOCAL (no UTC) con esos componentes
+  let fechaLocal = new Date(utcYear, utcMonth, utcDate, 0, 0, 0, 0);
+  
+  console.log("  🔍 AJUSTE A DÍA HÁBIL:");
+  console.log("  📥 Entrada (ISO):", fecha);
+  console.log("  📅 Componentes UTC: año=" + utcYear + ", mes=" + (utcMonth + 1) + ", día=" + utcDate);
+  console.log("  📅 Fecha LOCAL reconstruida:", fechaLocal.toLocaleDateString('es-CO'));
+  console.log("  📅 Día semana (0=Dom):", fechaLocal.getDay());
 
   let intentos = 0;
   const maxIntentos = 100;
 
-  console.log("  🔄 Iniciando ajuste a día hábil desde:", fechaAjustada.toISOString().split('T')[0]);
-  console.log("  🔄 Día de semana (0=Dom, 1=Lun...):", fechaAjustada.getDay());
-
   while (intentos < maxIntentos) {
-    const diaSemana = fechaAjustada.getDay();
+    const diaSemana = fechaLocal.getDay();
     const diasNombre = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-    const fechaFormato = fechaAjustada.toISOString().split('T')[0];
     
-    console.log(`  📅 Iteración ${intentos + 1}: ${fechaFormato} (${diasNombre[diaSemana]})`);
+    console.log(`  📅 Iteración ${intentos + 1}: ${fechaLocal.toLocaleDateString('es-CO')} (${diasNombre[diaSemana]})`);
     
-    // Si es fin de semana, SUMAR días hasta llegar a lunes
+    // Sábado (6) -> sumar 2 días para lunes
     if (diaSemana === 6) {
-      // Sábado -> sumar 2 días (lunes)
-      console.log("  📅 Es sábado, sumando 2 días");
-      fechaAjustada.setDate(fechaAjustada.getDate() + 2);
+      console.log("  ➕ Es sábado, sumando 2 días");
+      fechaLocal.setDate(fechaLocal.getDate() + 2);
       intentos++;
       continue;
     }
     
+    // Domingo (0) -> sumar 1 día para lunes
     if (diaSemana === 0) {
-      // Domingo -> sumar 1 día (lunes)
-      console.log("  📅 Es domingo, sumando 1 día");
-      fechaAjustada.setDate(fechaAjustada.getDate() + 1);
+      console.log("  ➕ Es domingo, sumando 1 día");
+      fechaLocal.setDate(fechaLocal.getDate() + 1);
       intentos++;
       continue;
     }
 
-    // Si es entre lunes-viernes (1-5), verificar si es festivo
+    // Lunes-Viernes (1-5): verificar si es festivo
     try {
-      const fechaStr = fechaAjustada.toISOString().split('T')[0];
+      const año = fechaLocal.getFullYear();
+      const mes = String(fechaLocal.getMonth() + 1).padStart(2, '0');
+      const día = String(fechaLocal.getDate()).padStart(2, '0');
+      const fechaStr = `${año}-${mes}-${día}`;
+      
       console.log("  🔍 Verificando si es festivo:", fechaStr);
       
       const festivo = await mongoose.connection.collection('festivos').findOne({
@@ -323,24 +333,25 @@ async function ajustarADiaHabil(fecha) {
       });
 
       if (festivo) {
-        // Es feriado, SUMAR 1 día y continuar validando
-        console.log("  📅 Es feriado, sumando 1 día");
-        fechaAjustada.setDate(fechaAjustada.getDate() + 1);
+        console.log("  ➕ Es feriado, sumando 1 día");
+        fechaLocal.setDate(fechaLocal.getDate() + 1);
         intentos++;
         continue;
       } else {
         console.log("  ✅ No es feriado");
       }
     } catch (error) {
-      console.error('Error verificando feriado:', error);
+      console.error('  ❌ Error verificando feriado:', error);
     }
 
-    // Es un día hábil válido, salir del loop
-    console.log("  ✅ Día hábil encontrado:", fechaAjustada.toISOString().split('T')[0]);
+    // Es un día hábil válido
+    console.log("  ✅ Día hábil encontrado:", fechaLocal.toLocaleDateString('es-CO'));
     break;
   }
 
-  return fechaAjustada;
+  console.log("  📤 Salida (ISO string):", fechaLocal.toISOString());
+  
+  return fechaLocal;
 }
 
 function resolverEstadoCierre(fechaCierre) {
@@ -553,7 +564,7 @@ app.put('/usuarios/:id/resetear-password', auth, esCoordinadorOAdmin, async (req
       return res.status(404).json({ error: "Usuario no encontrado" });
     }
 
-    console.log("  ✅ Contraseña reseteada por:", req.user.nombre);
+    console.log("  �� Contraseña reseteada por:", req.user.nombre);
     console.log("  👤 Usuario afectado:", usuario.nombre);
     console.log("  🔐 primeraVez marcado como true");
 
@@ -1067,16 +1078,10 @@ app.put('/actividades/:id', auth, esSuperAdmin, async (req, res) => {
       return res.status(400).json({ error: "fechaCierre es requerida" });
     }
 
-    // Convertir fecha y ajustar a día hábil
-    let fechaAjustada = new Date(fechaCierre);
-    fechaAjustada.setHours(0, 0, 0, 0);
-
-    console.log("  📅 Fecha original seleccionada:", fechaAjustada.toISOString().split('T')[0]);
-
     // Ajustar a día hábil
-    fechaAjustada = await ajustarADiaHabil(fechaAjustada);
+    let fechaAjustada = await ajustarADiaHabil(fechaCierre);
 
-    console.log("  📅 Fecha ajustada a día hábil:", fechaAjustada.toISOString().split('T')[0]);
+    console.log("  📅 Fecha final ajustada:", fechaAjustada.toISOString());
 
     const actividad = await Actividad.findByIdAndUpdate(
       req.params.id,
@@ -1094,7 +1099,6 @@ app.put('/actividades/:id', auth, esSuperAdmin, async (req, res) => {
 
     console.log("  ✅ Actividad actualizada:", actividad._id);
     console.log("  📅 Nueva fechaCierre (ajustada):", actividad.fechaCierre);
-    console.log("  📅 fechaModificacion:", actividad.fechaModificacion);
 
     res.json({
       ...actividad.toObject(),
