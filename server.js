@@ -273,68 +273,66 @@ function sumarDiasHabiles(fecha, dias) {
   return resultado;
 }
 
-async function ajustarADiaHabil(fecha) {
-  console.log("\n  🔍 AJUSTE A DÍA HÁBIL:");
-  console.log("  📥 Entrada (ISO):", fecha);
+async function ajustarADiaHabil(fechaISO) {
+  console.log("\n  🔍 AJUSTE A DÍA HÁBIL (UTC):");
+  console.log("  📥 Entrada (ISO):", fechaISO);
 
-  // Parsear ISO string
-  const fechaDate = new Date(fecha);
-  console.log("  📅 Fecha parseada como Date:", fechaDate.toString());
-
-  // Extraer componentes UTC
-  const utcYear = fechaDate.getUTCFullYear();
-  const utcMonth = fechaDate.getUTCMonth();
-  const utcDate = fechaDate.getUTCDate();
+  // Parsear el ISO string y extraer componentes
+  const regex = /(\d{4})-(\d{2})-(\d{2})/;
+  const match = fechaISO.match(regex);
   
-  console.log("  📅 Componentes UTC: año=" + utcYear + ", mes=" + (utcMonth + 1) + ", día=" + utcDate);
+  if (!match) {
+    throw new Error("Formato de fecha inválido: " + fechaISO);
+  }
 
-  // Crear fecha en zona LOCAL con esos componentes
-  let fechaLocal = new Date(utcYear, utcMonth, utcDate, 0, 0, 0, 0);
+  const year = parseInt(match[1]);
+  const month = parseInt(match[2]) - 1; // JavaScript usa 0-11
+  const day = parseInt(match[3]);
+
+  console.log("  📅 Componentes extraídos: año=" + year + ", mes=" + (month + 1) + ", día=" + day);
+
+  // Crear una fecha UTC
+  let fecha = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
   
-  console.log("  📅 Fecha LOCAL reconstruida:", fechaLocal.toString());
-  console.log("  📅 toLocaleDateString:", fechaLocal.toLocaleDateString('es-CO'));
-
-  let diaSemana = fechaLocal.getDay();
-  console.log("  📅 Día semana inicial (0=Dom, 6=Sab):", diaSemana);
+  console.log("  📅 Fecha UTC creada:", fecha.toISOString());
+  console.log("  📅 getUTCDay():", fecha.getUTCDay());
 
   const diasNombre = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-  console.log("  📅 Nombre día:", diasNombre[diaSemana]);
-
   let intentos = 0;
   const maxIntentos = 100;
 
   while (intentos < maxIntentos) {
-    diaSemana = fechaLocal.getDay();
-    const fechaFormato = fechaLocal.toLocaleDateString('es-CO');
+    const diaSemana = fecha.getUTCDay();
+    
+    const ano = fecha.getUTCFullYear();
+    const mes = String(fecha.getUTCMonth() + 1).padStart(2, '0');
+    const dia = String(fecha.getUTCDate()).padStart(2, '0');
+    const fechaFormato = `${ano}-${mes}-${dia}`;
     
     console.log(`  📅 Iteración ${intentos + 1}: ${fechaFormato} (${diasNombre[diaSemana]})`);
     
-    // Sábado (6) -> sumar 2 días para lunes
+    // Sábado (6)
     if (diaSemana === 6) {
-      console.log("  ➕ ES SÁBADO - Sumando 2 días para LUNES");
-      fechaLocal.setDate(fechaLocal.getDate() + 2);
-      console.log("  ➡️ Nueva fecha después de sumar:", fechaLocal.toLocaleDateString('es-CO'), "día:", fechaLocal.getDay());
+      console.log("  ➕ ES SÁBADO - Sumando 2 días");
+      fecha.setUTCDate(fecha.getUTCDate() + 2);
+      console.log("  ➡️ Nueva fecha:", fecha.toISOString());
       intentos++;
       continue;
     }
     
-    // Domingo (0) -> sumar 1 día para lunes
+    // Domingo (0)
     if (diaSemana === 0) {
-      console.log("  ➕ ES DOMINGO - Sumando 1 día para LUNES");
-      fechaLocal.setDate(fechaLocal.getDate() + 1);
-      console.log("  ➡️ Nueva fecha después de sumar:", fechaLocal.toLocaleDateString('es-CO'), "día:", fechaLocal.getDay());
+      console.log("  ➕ ES DOMINGO - Sumando 1 día");
+      fecha.setUTCDate(fecha.getUTCDate() + 1);
+      console.log("  ➡️ Nueva fecha:", fecha.toISOString());
       intentos++;
       continue;
     }
 
-    // Lunes-Viernes (1-5): verificar si es festivo
+    // Lunes-Viernes: verificar festivo
     try {
-      const año = fechaLocal.getFullYear();
-      const mes = String(fechaLocal.getMonth() + 1).padStart(2, '0');
-      const día = String(fechaLocal.getDate()).padStart(2, '0');
-      const fechaStr = `${año}-${mes}-${día}`;
-      
-      console.log("  🔍 Es L-V, verificando si es festivo:", fechaStr);
+      const fechaStr = fechaFormato;
+      console.log("  🔍 Verificando si es festivo:", fechaStr);
       
       const festivo = await mongoose.connection.collection('festivos').findOne({
         fecha: {
@@ -345,8 +343,8 @@ async function ajustarADiaHabil(fecha) {
 
       if (festivo) {
         console.log("  ➕ ES FERIADO - Sumando 1 día");
-        fechaLocal.setDate(fechaLocal.getDate() + 1);
-        console.log("  ➡️ Nueva fecha después de sumar:", fechaLocal.toLocaleDateString('es-CO'), "día:", fechaLocal.getDay());
+        fecha.setUTCDate(fecha.getUTCDate() + 1);
+        console.log("  ➡️ Nueva fecha:", fecha.toISOString());
         intentos++;
         continue;
       } else {
@@ -356,21 +354,14 @@ async function ajustarADiaHabil(fecha) {
       console.error('  ❌ Error verificando feriado:', error);
     }
 
-    // Es un día hábil válido - SALIR DEL LOOP
-    console.log("  ✅ SALIENDO DEL LOOP - Día hábil encontrado");
+    // Es un día hábil válido - SALIR
+    console.log("  ✅ SALIENDO DEL LOOP");
     break;
   }
 
-  // Convertir de vuelta a ISO string
-  const year_str = String(fechaLocal.getFullYear()).padStart(4, '0');
-  const month_str = String(fechaLocal.getMonth() + 1).padStart(2, '0');
-  const day_str = String(fechaLocal.getDate()).padStart(2, '0');
-  const isoFinal = `${year_str}-${month_str}-${day_str}T00:00:00Z`;
+  console.log("  📤 FINAL - Retornando:", fecha.toISOString());
   
-  console.log("  📤 FINAL - Retornando Date convertido de:", isoFinal);
-  console.log("  📤 FINAL - toLocaleDateString:", new Date(isoFinal).toLocaleDateString('es-CO'));
-  
-  return new Date(isoFinal);
+  return fecha;
 }
 
 function resolverEstadoCierre(fechaCierre) {
