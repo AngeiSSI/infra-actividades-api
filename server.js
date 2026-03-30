@@ -280,12 +280,17 @@ async function ajustarADiaHabil(fecha) {
   let intentos = 0;
   const maxIntentos = 100;
 
+  console.log("  🔄 Iniciando ajuste a día hábil desde:", fechaAjustada.toISOString().split('T')[0]);
+
   while (intentos < maxIntentos) {
     const diaSemana = fechaAjustada.getDay();
+    const diasNombre = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+    console.log(`  📅 Iteración ${intentos + 1}: ${fechaAjustada.toISOString().split('T')[0]} (${diasNombre[diaSemana]})`);
     
-    // Si es fin de semana
+    // Si es fin de semana, SUMAR días hasta llegar a lunes
     if (diaSemana === 6) {
       // Sábado -> sumar 2 días (lunes)
+      console.log("  📅 Es sábado, sumando 2 días");
       fechaAjustada.setDate(fechaAjustada.getDate() + 2);
       intentos++;
       continue;
@@ -293,6 +298,7 @@ async function ajustarADiaHabil(fecha) {
     
     if (diaSemana === 0) {
       // Domingo -> sumar 1 día (lunes)
+      console.log("  📅 Es domingo, sumando 1 día");
       fechaAjustada.setDate(fechaAjustada.getDate() + 1);
       intentos++;
       continue;
@@ -309,7 +315,8 @@ async function ajustarADiaHabil(fecha) {
       });
 
       if (festivo) {
-        // Es feriado, sumar 1 día
+        // Es feriado, SUMAR 1 día y continuar validando
+        console.log("  📅 Es feriado, sumando 1 día");
         fechaAjustada.setDate(fechaAjustada.getDate() + 1);
         intentos++;
         continue;
@@ -318,7 +325,8 @@ async function ajustarADiaHabil(fecha) {
       console.error('Error verificando feriado:', error);
     }
 
-    // Es un día hábil válido
+    // Es un día hábil válido, salir del loop
+    console.log("  ✅ Día hábil encontrado:", fechaAjustada.toISOString().split('T')[0]);
     break;
   }
 
