@@ -274,18 +274,24 @@ function sumarDiasHabiles(fecha, dias) {
 }
 
 async function ajustarADiaHabil(fecha) {
+  // La fecha llega como ISO string, la convertimos a fecha local
   let fechaAjustada = new Date(fecha);
+  
+  // Establecer a medianoche en zona local
   fechaAjustada.setHours(0, 0, 0, 0);
 
   let intentos = 0;
   const maxIntentos = 100;
 
   console.log("  🔄 Iniciando ajuste a día hábil desde:", fechaAjustada.toISOString().split('T')[0]);
+  console.log("  🔄 Día de semana (0=Dom, 1=Lun...):", fechaAjustada.getDay());
 
   while (intentos < maxIntentos) {
     const diaSemana = fechaAjustada.getDay();
     const diasNombre = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-    console.log(`  📅 Iteración ${intentos + 1}: ${fechaAjustada.toISOString().split('T')[0]} (${diasNombre[diaSemana]})`);
+    const fechaFormato = fechaAjustada.toISOString().split('T')[0];
+    
+    console.log(`  📅 Iteración ${intentos + 1}: ${fechaFormato} (${diasNombre[diaSemana]})`);
     
     // Si es fin de semana, SUMAR días hasta llegar a lunes
     if (diaSemana === 6) {
@@ -304,9 +310,11 @@ async function ajustarADiaHabil(fecha) {
       continue;
     }
 
-    // Si es entre lunes-viernes, verificar si es festivo
+    // Si es entre lunes-viernes (1-5), verificar si es festivo
     try {
       const fechaStr = fechaAjustada.toISOString().split('T')[0];
+      console.log("  🔍 Verificando si es festivo:", fechaStr);
+      
       const festivo = await mongoose.connection.collection('festivos').findOne({
         fecha: {
           $gte: new Date(fechaStr + 'T00:00:00Z'),
@@ -320,6 +328,8 @@ async function ajustarADiaHabil(fecha) {
         fechaAjustada.setDate(fechaAjustada.getDate() + 1);
         intentos++;
         continue;
+      } else {
+        console.log("  ✅ No es feriado");
       }
     } catch (error) {
       console.error('Error verificando feriado:', error);
