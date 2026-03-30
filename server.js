@@ -1091,14 +1091,22 @@ app.put('/actividades/:id', auth, esSuperAdmin, async (req, res) => {
     // Ajustar a día hábil
     let fechaAjustada = await ajustarADiaHabil(fechaCierre);
 
-    console.log("  📅 Fecha final ajustada:", fechaAjustada.toISOString());
+    console.log("\n  ✅ DESPUÉS DE ajustarADiaHabil():");
+    console.log("  📤 Tipo:", typeof fechaAjustada);
+    console.log("  📤 Valor:", fechaAjustada);
+    console.log("  📤 toISOString():", fechaAjustada.toISOString());
+    console.log("  📤 getTime():", fechaAjustada.getTime());
+
+    const actualizacion = {
+      fechaCierre: fechaAjustada,
+      fechaModificacion: new Date()
+    };
+
+    console.log("  📤 Objeto actualizacion antes de guardar:", JSON.stringify(actualizacion, null, 2));
 
     const actividad = await Actividad.findByIdAndUpdate(
       req.params.id,
-      {
-        fechaCierre: fechaAjustada,
-        fechaModificacion: new Date()
-      },
+      actualizacion,
       { new: true, runValidators: false }
     );
 
@@ -1107,8 +1115,10 @@ app.put('/actividades/:id', auth, esSuperAdmin, async (req, res) => {
       return res.status(404).json({ error: "Actividad no encontrada" });
     }
 
-    console.log("  ✅ Actividad actualizada:", actividad._id);
-    console.log("  📅 Nueva fechaCierre (ajustada):", actividad.fechaCierre);
+    console.log("\n  ✅ DESPUÉS de guardar en BD:");
+    console.log("  📤 fechaCierre en BD:", actividad.fechaCierre);
+    console.log("  📤 fechaCierre toISOString():", actividad.fechaCierre.toISOString());
+    console.log("  📤 Actividad actualizada:", actividad._id);
 
     res.json({
       ...actividad.toObject(),
@@ -1117,6 +1127,7 @@ app.put('/actividades/:id', auth, esSuperAdmin, async (req, res) => {
 
   } catch (err) {
     console.error("  ❌ Error:", err.message);
+    console.error("  ❌ Stack:", err.stack);
     res.status(500).json({ error: err.message });
   }
 });
