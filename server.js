@@ -1777,15 +1777,18 @@ app.get('/festivos', async (req, res) => {
   try {
     console.log('\n📅 GET /festivos');
     
-    const año = req.query.año ? parseInt(req.query.año) : new Date().getFullYear();
-    console.log('  📤 Año solicitado:', año);
+    // Traer TODOS los festivos sin filtro
+    const festivos = await mongoose.connection.collection('festivos').find({}).toArray();
 
-    // Buscar sin filtro de año primero para ver qué hay
-    const festivos = await mongoose.connection.collection('festivos').find().toArray();
-
-    console.log('  ✅ Festivos encontrados:', festivos.length);
-    console.log('  📋 Primeros festivos:', festivos.slice(0, 3));
+    console.log('  ✅ Total de festivos en BD:', festivos.length);
     
+    if (festivos.length > 0) {
+      console.log('  📋 Primeros 3 festivos:');
+      festivos.slice(0, 3).forEach((f: any, idx: number) => {
+        console.log(`     [${idx}] ID: ${f._id}, Fecha: ${f.fecha}, Descripción: ${f.descripcion}`);
+      });
+    }
+
     res.json(festivos);
   } catch (err) {
     console.error('  ❌ Error:', err.message);
