@@ -1860,6 +1860,92 @@ app.delete('/festivos/:id', auth, esAdministrador, async (req, res) => {
   }
 });
 
+/* ================= INIT - RESTAURAR FESTIVOS COLOMBIA 2026-2028 ================= */
+app.get('/init/restaurar-festivos', async (req, res) => {
+  try {
+    console.log('\n🔧 Restaurando festivos de Colombia 2026-2028...');
+
+    // Eliminar todos
+    await mongoose.connection.collection('festivos').deleteMany({});
+
+    // Festivos de Colombia 2026-2028
+    const festivosIniciales = [
+      // ======== 2026 ========
+      { fecha: new Date('2026-01-01T00:00:00Z'), descripcion: 'Año Nuevo' },
+      { fecha: new Date('2026-01-12T00:00:00Z'), descripcion: 'Reyes Magos' },
+      { fecha: new Date('2026-03-25T00:00:00Z'), descripcion: 'San José' },
+      { fecha: new Date('2026-04-09T00:00:00Z'), descripcion: 'Jueves Santo' },
+      { fecha: new Date('2026-04-10T00:00:00Z'), descripcion: 'Viernes Santo' },
+      { fecha: new Date('2026-05-01T00:00:00Z'), descripcion: 'Día del Trabajo' },
+      { fecha: new Date('2026-05-14T00:00:00Z'), descripcion: 'Ascensión' },
+      { fecha: new Date('2026-06-11T00:00:00Z'), descripcion: 'Corpus Christi' },
+      { fecha: new Date('2026-06-19T00:00:00Z'), descripcion: 'Sagrado Corazón' },
+      { fecha: new Date('2026-07-01T00:00:00Z'), descripcion: 'San Pedro y San Pablo' },
+      { fecha: new Date('2026-07-20T00:00:00Z'), descripcion: 'Independencia de Colombia' },
+      { fecha: new Date('2026-08-07T00:00:00Z'), descripcion: 'Batalla de Boyacá' },
+      { fecha: new Date('2026-08-19T00:00:00Z'), descripcion: 'Asunción de María' },
+      { fecha: new Date('2026-11-01T00:00:00Z'), descripcion: 'Todos los Santos' },
+      { fecha: new Date('2026-11-11T00:00:00Z'), descripcion: 'Independencia de Cartagena' },
+      { fecha: new Date('2026-12-08T00:00:00Z'), descripcion: 'Inmaculada Concepción' },
+      { fecha: new Date('2026-12-25T00:00:00Z'), descripcion: 'Navidad' },
+
+      // ======== 2027 ========
+      { fecha: new Date('2027-01-01T00:00:00Z'), descripcion: 'Año Nuevo' },
+      { fecha: new Date('2027-01-11T00:00:00Z'), descripcion: 'Reyes Magos' },
+      { fecha: new Date('2027-03-19T00:00:00Z'), descripcion: 'San José' },
+      { fecha: new Date('2027-03-25T00:00:00Z'), descripcion: 'Jueves Santo' },
+      { fecha: new Date('2027-03-26T00:00:00Z'), descripcion: 'Viernes Santo' },
+      { fecha: new Date('2027-05-01T00:00:00Z'), descripcion: 'Día del Trabajo' },
+      { fecha: new Date('2027-05-13T00:00:00Z'), descripcion: 'Ascensión' },
+      { fecha: new Date('2027-06-10T00:00:00Z'), descripcion: 'Corpus Christi' },
+      { fecha: new Date('2027-06-18T00:00:00Z'), descripcion: 'Sagrado Corazón' },
+      { fecha: new Date('2027-07-01T00:00:00Z'), descripcion: 'San Pedro y San Pablo' },
+      { fecha: new Date('2027-07-20T00:00:00Z'), descripcion: 'Independencia de Colombia' },
+      { fecha: new Date('2027-08-07T00:00:00Z'), descripcion: 'Batalla de Boyacá' },
+      { fecha: new Date('2027-08-18T00:00:00Z'), descripcion: 'Asunción de María' },
+      { fecha: new Date('2027-11-01T00:00:00Z'), descripcion: 'Todos los Santos' },
+      { fecha: new Date('2027-11-11T00:00:00Z'), descripcion: 'Independencia de Cartagena' },
+      { fecha: new Date('2027-12-08T00:00:00Z'), descripcion: 'Inmaculada Concepción' },
+      { fecha: new Date('2027-12-25T00:00:00Z'), descripcion: 'Navidad' },
+
+      // ======== 2028 ========
+      { fecha: new Date('2028-01-01T00:00:00Z'), descripcion: 'Año Nuevo' },
+      { fecha: new Date('2028-01-10T00:00:00Z'), descripcion: 'Reyes Magos' },
+      { fecha: new Date('2028-03-22T00:00:00Z'), descripcion: 'San José' },
+      { fecha: new Date('2028-04-13T00:00:00Z'), descripcion: 'Jueves Santo' },
+      { fecha: new Date('2028-04-14T00:00:00Z'), descripcion: 'Viernes Santo' },
+      { fecha: new Date('2028-05-01T00:00:00Z'), descripcion: 'Día del Trabajo' },
+      { fecha: new Date('2028-05-25T00:00:00Z'), descripcion: 'Ascensión' },
+      { fecha: new Date('2028-06-15T00:00:00Z'), descripcion: 'Corpus Christi' },
+      { fecha: new Date('2028-06-23T00:00:00Z'), descripcion: 'Sagrado Corazón' },
+      { fecha: new Date('2028-07-01T00:00:00Z'), descripcion: 'San Pedro y San Pablo' },
+      { fecha: new Date('2028-07-20T00:00:00Z'), descripcion: 'Independencia de Colombia' },
+      { fecha: new Date('2028-08-07T00:00:00Z'), descripcion: 'Batalla de Boyacá' },
+      { fecha: new Date('2028-08-21T00:00:00Z'), descripcion: 'Asunción de María' },
+      { fecha: new Date('2028-11-01T00:00:00Z'), descripcion: 'Todos los Santos' },
+      { fecha: new Date('2028-11-13T00:00:00Z'), descripcion: 'Independencia de Cartagena' },
+      { fecha: new Date('2028-12-08T00:00:00Z'), descripcion: 'Inmaculada Concepción' },
+      { fecha: new Date('2028-12-25T00:00:00Z'), descripcion: 'Navidad' }
+    ];
+
+    const resultado = await mongoose.connection.collection('festivos').insertMany(festivosIniciales);
+
+    console.log('  ✅ Festivos restaurados:', resultado.insertedCount);
+    res.json({ 
+      mensaje: 'Festivos restaurados correctamente (2026-2028)',
+      cantidad: resultado.insertedCount,
+      por_año: {
+        '2026': 17,
+        '2027': 17,
+        '2028': 17
+      }
+    });
+  } catch (err) {
+    console.error('  ❌ Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* ================= TEST ================= */
 app.get('/', (req, res) => {
   res.send('API Infra funcionando 🚀');
