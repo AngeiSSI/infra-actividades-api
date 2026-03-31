@@ -1784,7 +1784,7 @@ app.get('/festivos', async (req, res) => {
     
     if (festivos.length > 0) {
       console.log('  📋 Primeros 3 festivos:');
-      festivos.slice(0, 3).forEach((f: any, idx: number) => {
+      festivos.slice(0, 3).forEach((f, idx) => {
         console.log(`     [${idx}] ID: ${f._id}, Fecha: ${f.fecha}, Descripción: ${f.descripcion}`);
       });
     }
