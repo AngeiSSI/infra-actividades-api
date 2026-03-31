@@ -213,6 +213,14 @@ function esCoordinadorOAdmin(req, res, next) {
   next();
 }
 
+function esAdministrador(req, res, next) {
+  const rol = req.user?.rol?.toLowerCase();
+  if (rol !== 'administrador' && rol !== 'super_admin') {
+    return res.status(403).json({ error: "Acceso denegado - requiere permisos de Administrador" });
+  }
+  next();
+}
+
 function esSuperAdmin(req, res, next) {
   const rol = req.user?.rol?.toLowerCase();
   if (rol !== 'super_admin') {
@@ -277,7 +285,6 @@ async function ajustarADiaHabil(fechaISO) {
   console.log("\n  🔍 AJUSTE A DÍA HÁBIL (UTC):");
   console.log("  📥 Entrada (ISO):", fechaISO);
 
-  // Parsear el ISO string y extraer componentes
   const regex = /(\d{4})-(\d{2})-(\d{2})/;
   const match = fechaISO.match(regex);
   
@@ -286,12 +293,11 @@ async function ajustarADiaHabil(fechaISO) {
   }
 
   const year = parseInt(match[1]);
-  const month = parseInt(match[2]) - 1; // JavaScript usa 0-11
+  const month = parseInt(match[2]) - 1;
   const day = parseInt(match[3]);
 
   console.log("  📅 Componentes extraídos: año=" + year + ", mes=" + (month + 1) + ", día=" + day);
 
-  // Crear una fecha UTC
   let fecha = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
   
   console.log("  📅 Fecha UTC creada:", fecha.toISOString());
@@ -311,7 +317,6 @@ async function ajustarADiaHabil(fechaISO) {
     
     console.log(`  📅 Iteración ${intentos + 1}: ${fechaFormato} (${diasNombre[diaSemana]})`);
     
-    // Sábado (6)
     if (diaSemana === 6) {
       console.log("  ➕ ES SÁBADO - Sumando 2 días");
       fecha.setUTCDate(fecha.getUTCDate() + 2);
@@ -320,7 +325,6 @@ async function ajustarADiaHabil(fechaISO) {
       continue;
     }
     
-    // Domingo (0)
     if (diaSemana === 0) {
       console.log("  ➕ ES DOMINGO - Sumando 1 día");
       fecha.setUTCDate(fecha.getUTCDate() + 1);
@@ -329,7 +333,6 @@ async function ajustarADiaHabil(fechaISO) {
       continue;
     }
 
-    // Lunes-Viernes: verificar festivo
     try {
       const fechaStr = fechaFormato;
       console.log("  🔍 Verificando si es festivo:", fechaStr);
@@ -354,7 +357,6 @@ async function ajustarADiaHabil(fechaISO) {
       console.error('  ❌ Error verificando feriado:', error);
     }
 
-    // Es un día hábil válido - SALIR
     console.log("  ✅ SALIENDO DEL LOOP");
     break;
   }
@@ -1088,14 +1090,9 @@ app.put('/actividades/:id', auth, esSuperAdmin, async (req, res) => {
       return res.status(400).json({ error: "fechaCierre es requerida" });
     }
 
-    // Ajustar a día hábil
     let fechaAjustada = await ajustarADiaHabil(fechaCierre);
 
-    console.log("\n  ✅ DESPUÉS DE ajustarADiaHabil():");
-    console.log("  📤 Tipo:", typeof fechaAjustada);
-    console.log("  📤 Valor:", fechaAjustada);
-    console.log("  📤 toISOString():", fechaAjustada.toISOString());
-    console.log("  📤 getTime():", fechaAjustada.getTime());
+    console.log("  📅 Fecha final ajustada:", fechaAjustada.toISOString());
 
     const actualizacion = {
       fechaCierre: fechaAjustada,
@@ -1771,6 +1768,91 @@ app.delete('/asignaciones/:id', auth, async (req, res) => {
     res.json({ mensaje: "Asignación eliminada correctamente" });
   } catch (err) {
     console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= FESTIVOS - GET ================= */
+app.get('/festivos', async (req, res) => {
+  try {
+    console.log('\n📅 GET /festivos');
+    
+    const año = req.query.año ? parseInt(req.query.año) : new Date().getFullYear();
+    console.log('  📤 Año solicitado:', año);
+
+    // Buscar sin filtro de año primero para ver qué hay
+    const festivos = await mongoose.connection.collection('festivos').find().toArray();
+
+    console.log('  ✅ Festivos encontrados:', festivos.length);
+    console.log('  📋 Primeros festivos:', festivos.slice(0, 3));
+    
+    res.json(festivos);
+  } catch (err) {
+    console.error('  ❌ Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= FESTIVOS - POST (GUARDAR) ================= */
+app.post('/festivos/guardar', auth, esAdministrador, async (req, res) => {
+  try {
+    console.log('\n💾 POST /festivos/guardar - User:', req.user.nombre);
+    console.log('  📤 Festivos a guardar:', req.body.festivos.length);
+
+    const { festivos } = req.body;
+
+    if (!Array.isArray(festivos) || festivos.length === 0) {
+      return res.status(400).json({ error: 'Debes enviar al menos un festivo' });
+    }
+
+    const primerFestivo = new Date(festivos[0].fecha);
+    const año = primerFestivo.getFullYear();
+
+    await mongoose.connection.collection('festivos').deleteMany({
+      fecha: {
+        $gte: new Date(`${año}-01-01`),
+        $lt: new Date(`${año + 1}-01-01`)
+      }
+    });
+
+    console.log('  🗑️ Festivos anteriores eliminados');
+
+    const festivosInsert = festivos.map(f => ({
+      fecha: new Date(f.fecha),
+      año: año,
+      createdAt: new Date()
+    }));
+
+    const resultado = await mongoose.connection.collection('festivos').insertMany(festivosInsert);
+
+    console.log('  ✅ Festivos guardados:', resultado.insertedCount);
+    res.json({ 
+      mensaje: 'Festivos guardados correctamente',
+      cantidad: resultado.insertedCount 
+    });
+  } catch (err) {
+    console.error('  ❌ Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= FESTIVOS - DELETE ================= */
+app.delete('/festivos/:id', auth, esAdministrador, async (req, res) => {
+  try {
+    console.log('\n🗑️ DELETE /festivos/:id - User:', req.user.nombre);
+
+    const resultado = await mongoose.connection.collection('festivos').deleteOne({
+      _id: new mongoose.Types.ObjectId(req.params.id)
+    });
+
+    if (resultado.deletedCount === 0) {
+      return res.status(404).json({ error: 'Festivo no encontrado' });
+    }
+
+    console.log('  ✅ Festivo eliminado');
+    res.json({ mensaje: 'Festivo eliminado correctamente' });
+  } catch (err) {
+    console.error('  ❌ Error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
