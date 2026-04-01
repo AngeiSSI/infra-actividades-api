@@ -1796,6 +1796,153 @@ app.get('/festivos', async (req, res) => {
   }
 });
 
+/* ================= FESTIVOS - POST (AGREGAR UNO) ================= */
+app.post('/festivos', auth, esAdministrador, async (req, res) => {
+  try {
+    console.log('\n➕ POST /festivos - User:', req.user.nombre);
+    console.log('  📤 Festivo a agregar:', req.body);
+
+    const { fecha, descripcion } = req.body;
+
+    if (!fecha || !descripcion) {
+      return res.status(400).json({ error: 'Fecha y descripción son requeridas' });
+    }
+
+    const nuevoFestivo = {
+      fecha: new Date(fecha),
+      descripcion: descripcion.trim(),
+      createdAt: new Date()
+    };
+
+    console.log('  📤 Insertando:', nuevoFestivo);
+
+    const resultado = await mongoose.connection.collection('festivos').insertOne(nuevoFestivo);
+
+    console.log('  ✅ Festivo agregado:', resultado.insertedId);
+    res.status(201).json({ 
+      mensaje: 'Festivo agregado correctamente',
+      id: resultado.insertedId,
+      festivo: nuevoFestivo
+    });
+  } catch (err) {
+    console.error('  ❌ Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= FESTIVOS - POST (GUARDAR TODOS - REEMPLAZAR AÑO) ================= */
+app.post('/festivos/guardar', auth, esAdministrador, async (req, res) => {
+  try {
+    console.log('\n💾 POST /festivos/guardar - User:', req.user.nombre);
+    console.log('  📤 Festivos a guardar:', req.body.festivos.length);
+
+    const { festivos } = req.body;
+
+    if (!Array.isArray(festivos) || festivos.length === 0) {
+      return res.status(400).json({ error: 'Debes enviar al menos un festivo' });
+    }
+
+    const primerFestivo = new Date(festivos[0].fecha);
+    const anio = primerFestivo.getFullYear();
+
+    // Eliminar festivos del año
+    await mongoose.connection.collection('festivos').deleteMany({
+      fecha: {
+        $gte: new Date(`${anio}-01-01`),
+        $lt: new Date(`${anio + 1}-01-01`)
+      }
+    });
+
+    console.log('  🗑️ Festivos anteriores eliminados');
+
+    const festivosInsert = festivos.map(f => ({
+      fecha: new Date(f.fecha),
+      descripcion: f.descripcion || '',
+      createdAt: new Date()
+    }));
+
+    const resultado = await mongoose.connection.collection('festivos').insertMany(festivosInsert);
+
+    console.log('  ✅ Festivos guardados:', resultado.insertedCount);
+    res.json({ 
+      mensaje: 'Festivos guardados correctamente',
+      cantidad: resultado.insertedCount 
+    });
+  } catch (err) {
+    console.error('  ❌ Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= FESTIVOS - DELETE ================= */
+app.delete('/festivos/:id', auth, esAdministrador, async (req, res) => {
+  try {
+    console.log('\n🗑️ DELETE /festivos/:id - User:', req.user.nombre);
+
+    const resultado = await mongoose.connection.collection('festivos').deleteOne({
+      _id: new mongoose.Types.ObjectId(req.params.id)
+    });
+
+    if (resultado.deletedCount === 0) {
+      return res.status(404).json({ error: 'Festivo no encontrado' });
+    }
+
+    console.log('  ✅ Festivo eliminado');
+    res.json({ mensaje: 'Festivo eliminado correctamente' });
+  } catch (err) {
+    console.error('  ❌ Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= INIT - RESTAURAR FESTIVOS COLOMBIA 2026-2028 ================= */
+app.get('/init/restaurar-festivos', async (req, res) => {
+  try {
+    console.log('\n🔧 Restaurando festivos de Colombia 2026-2028...');
+
+    // Eliminar todos
+    await mongoose.connection.collection('festivos').deleteMany({});
+
+    // Festivos de Colombia 2026-2028
+    const festivosIniciales = [
+      // ======== 2026 ========
+      { fecha: new Date('2026-01-01T00:00:00Z'), descripcion: 'Año Nuevo' },
+      { fecha: new Date('2026-01-12T00:00:00Z'), descripcion: 'Reyes Magos' },
+      { fecha: new Date('2026-03-23T00:00:00Z'), descripcion: 'San José' },
+      { fecha: new Date('2026-04-02T00:00:00Z'), descripcion: 'Jueves Santo' },
+      { fecha: new Date('2026-04-03T00:00:00Z'), descripcion: 'Viernes Santo' },
+      { fecha: new Date('2026-05-01T00:00:00Z'), descripcion: 'Día del Trabajo' },
+      { fecha: new Date('2026-05-18T00:00:00Z'), descripcion: 'Ascensión' },
+      { fecha: new Date('2026-06-08T00:00:00Z'), descripcion: 'Corpus Christi' },
+      { fecha: new Date('2026-06-15T00:00:00Z'), descripcion: 'Sagrado Corazón' },
+      { fecha: new Date('2026-06-29T00:00:00Z'), descripcion: 'San Pedro y San Pablo' },
+      { fecha: new Date('2026-07-20T00:00:00Z'), descripcion: 'Independencia de Colombia' },
+      { fecha: new Date('2026-08-07T00:00:00Z'), descripcion: 'Batalla de Boyacá' },
+      { fecha: new Date('2026-08-17T00:00:00Z'), descripcion: 'Asunción de María' },
+      { fecha: new Date('2026-10-12T00:00:00Z'), descripcion: 'Día de la raza' },
+      { fecha: new Date('2026-11-02T00:00:00Z'), descripcion: 'Todos los Santos' },
+      { fecha: new Date('2026-11-16T00:00:00Z'), descripcion: 'Independencia de Cartagena' },
+      { fecha: new Date('2026-12-08T00:00:00Z'), descripcion: 'Inmaculada Concepción' },
+      { fecha: new Date('2026-12-25T00:00:00Z'), descripcion: 'Navidad' },
+
+    ];
+
+    const resultado = await mongoose.connection.collection('festivos').insertMany(festivosIniciales);
+
+    console.log('  ✅ Festivos restaurados:', resultado.insertedCount);
+    res.json({ 
+      mensaje: 'Festivos restaurados correctamente (2026-2028)',
+      cantidad: resultado.insertedCount,
+      por_año: {
+        '2026': 17,
+            }
+    });
+  } catch (err) {
+    console.error('  ❌ Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* ================= FESTIVOS - POST (GUARDAR) ================= */
 app.post('/festivos/guardar', auth, esAdministrador, async (req, res) => {
   try {
