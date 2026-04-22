@@ -1959,92 +1959,6 @@ app.post('/festivos/guardar', auth, esAdministrador, async (req, res) => {
   }
 });
 
-/* ================= INIT - RESTAURAR FESTIVOS COLOMBIA 2026-2028 ================= */
-app.get('/init/restaurar-festivos', async (req, res) => {
-  try {
-    console.log('\n🔧 Restaurando festivos de Colombia 2026-2028...');
-
-    // Eliminar todos
-    await mongoose.connection.collection('festivos').deleteMany({});
-
-    // Festivos de Colombia 2026-2028
-    const festivosIniciales = [
-      // ======== 2026 ========
-      { fecha: new Date('2026-01-01T00:00:00Z'), descripcion: 'Año Nuevo' },
-      { fecha: new Date('2026-01-12T00:00:00Z'), descripcion: 'Reyes Magos' },
-      { fecha: new Date('2026-03-25T00:00:00Z'), descripcion: 'San José' },
-      { fecha: new Date('2026-04-09T00:00:00Z'), descripcion: 'Jueves Santo' },
-      { fecha: new Date('2026-04-10T00:00:00Z'), descripcion: 'Viernes Santo' },
-      { fecha: new Date('2026-05-01T00:00:00Z'), descripcion: 'Día del Trabajo' },
-      { fecha: new Date('2026-05-14T00:00:00Z'), descripcion: 'Ascensión' },
-      { fecha: new Date('2026-06-11T00:00:00Z'), descripcion: 'Corpus Christi' },
-      { fecha: new Date('2026-06-19T00:00:00Z'), descripcion: 'Sagrado Corazón' },
-      { fecha: new Date('2026-07-01T00:00:00Z'), descripcion: 'San Pedro y San Pablo' },
-      { fecha: new Date('2026-07-20T00:00:00Z'), descripcion: 'Independencia de Colombia' },
-      { fecha: new Date('2026-08-07T00:00:00Z'), descripcion: 'Batalla de Boyacá' },
-      { fecha: new Date('2026-08-19T00:00:00Z'), descripcion: 'Asunción de María' },
-      { fecha: new Date('2026-11-01T00:00:00Z'), descripcion: 'Todos los Santos' },
-      { fecha: new Date('2026-11-11T00:00:00Z'), descripcion: 'Independencia de Cartagena' },
-      { fecha: new Date('2026-12-08T00:00:00Z'), descripcion: 'Inmaculada Concepción' },
-      { fecha: new Date('2026-12-25T00:00:00Z'), descripcion: 'Navidad' },
-
-      // ======== 2027 ========
-      { fecha: new Date('2027-01-01T00:00:00Z'), descripcion: 'Año Nuevo' },
-      { fecha: new Date('2027-01-11T00:00:00Z'), descripcion: 'Reyes Magos' },
-      { fecha: new Date('2027-03-19T00:00:00Z'), descripcion: 'San José' },
-      { fecha: new Date('2027-03-25T00:00:00Z'), descripcion: 'Jueves Santo' },
-      { fecha: new Date('2027-03-26T00:00:00Z'), descripcion: 'Viernes Santo' },
-      { fecha: new Date('2027-05-01T00:00:00Z'), descripcion: 'Día del Trabajo' },
-      { fecha: new Date('2027-05-13T00:00:00Z'), descripcion: 'Ascensión' },
-      { fecha: new Date('2027-06-10T00:00:00Z'), descripcion: 'Corpus Christi' },
-      { fecha: new Date('2027-06-18T00:00:00Z'), descripcion: 'Sagrado Corazón' },
-      { fecha: new Date('2027-07-01T00:00:00Z'), descripcion: 'San Pedro y San Pablo' },
-      { fecha: new Date('2027-07-20T00:00:00Z'), descripcion: 'Independencia de Colombia' },
-      { fecha: new Date('2027-08-07T00:00:00Z'), descripcion: 'Batalla de Boyacá' },
-      { fecha: new Date('2027-08-18T00:00:00Z'), descripcion: 'Asunción de María' },
-      { fecha: new Date('2027-11-01T00:00:00Z'), descripcion: 'Todos los Santos' },
-      { fecha: new Date('2027-11-11T00:00:00Z'), descripcion: 'Independencia de Cartagena' },
-      { fecha: new Date('2027-12-08T00:00:00Z'), descripcion: 'Inmaculada Concepción' },
-      { fecha: new Date('2027-12-25T00:00:00Z'), descripcion: 'Navidad' },
-
-      // ======== 2028 ========
-      { fecha: new Date('2028-01-01T00:00:00Z'), descripcion: 'Año Nuevo' },
-      { fecha: new Date('2028-01-10T00:00:00Z'), descripcion: 'Reyes Magos' },
-      { fecha: new Date('2028-03-22T00:00:00Z'), descripcion: 'San José' },
-      { fecha: new Date('2028-04-13T00:00:00Z'), descripcion: 'Jueves Santo' },
-      { fecha: new Date('2028-04-14T00:00:00Z'), descripcion: 'Viernes Santo' },
-      { fecha: new Date('2028-05-01T00:00:00Z'), descripcion: 'Día del Trabajo' },
-      { fecha: new Date('2028-05-25T00:00:00Z'), descripcion: 'Ascensión' },
-      { fecha: new Date('2028-06-15T00:00:00Z'), descripcion: 'Corpus Christi' },
-      { fecha: new Date('2028-06-23T00:00:00Z'), descripcion: 'Sagrado Corazón' },
-      { fecha: new Date('2028-07-01T00:00:00Z'), descripcion: 'San Pedro y San Pablo' },
-      { fecha: new Date('2028-07-20T00:00:00Z'), descripcion: 'Independencia de Colombia' },
-      { fecha: new Date('2028-08-07T00:00:00Z'), descripcion: 'Batalla de Boyacá' },
-      { fecha: new Date('2028-08-21T00:00:00Z'), descripcion: 'Asunción de María' },
-      { fecha: new Date('2028-11-01T00:00:00Z'), descripcion: 'Todos los Santos' },
-      { fecha: new Date('2028-11-13T00:00:00Z'), descripcion: 'Independencia de Cartagena' },
-      { fecha: new Date('2028-12-08T00:00:00Z'), descripcion: 'Inmaculada Concepción' },
-      { fecha: new Date('2028-12-25T00:00:00Z'), descripcion: 'Navidad' }
-    ];
-
-    const resultado = await mongoose.connection.collection('festivos').insertMany(festivosIniciales);
-
-    console.log('  ✅ Festivos restaurados:', resultado.insertedCount);
-    res.json({ 
-      mensaje: 'Festivos restaurados correctamente (2026-2028)',
-      cantidad: resultado.insertedCount,
-      por_año: {
-        '2026': 17,
-        '2027': 17,
-        '2028': 17
-      }
-    });
-  } catch (err) {
-    console.error('  ❌ Error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 /* ================= FLUJO DE VALOR - GET ALL ================= */
 app.get('/flujo-valor', async (req, res) => {
   try {
@@ -2061,21 +1975,44 @@ app.get('/flujo-valor', async (req, res) => {
   }
 });
 
-/* ================= FLUJO DE VALOR - GET GERENTES ================= */
-app.get('/flujo-valor/gerentes', async (req, res) => {
+/* ================= FLUJO DE VALOR - GET TIPOLOGÍAS ================= */
+app.get('/flujo-valor/lista/tipologias', async (req, res) => {
   try {
-    console.log('\n📊 GET /flujo-valor/gerentes');
+    console.log('\n📊 GET /flujo-valor/lista/tipologias');
+
+    const tipologias = await mongoose.connection.collection('flujoValor').aggregate([
+      { $group: { _id: '$tipologia' } },
+      { $sort: { _id: 1 } }
+    ]).toArray();
+
+    const tipoList = tipologias.map(t => t._id).filter(t => t);
+
+    console.log('  ✅ Tipologías encontradas:', tipoList.length);
+
+    res.json(tipoList);
+  } catch (err) {
+    console.error('  ❌ Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= FLUJO DE VALOR - GET GERENTES POR TIPOLOGÍA ================= */
+app.get('/flujo-valor/lista/gerentes/:tipologia', async (req, res) => {
+  try {
+    console.log('\n📊 GET /flujo-valor/lista/gerentes/:tipologia');
+    console.log('  Tipología:', req.params.tipologia);
 
     const gerentes = await mongoose.connection.collection('flujoValor').aggregate([
+      { $match: { tipologia: req.params.tipologia } },
       { $group: { _id: '$gerente' } },
       { $sort: { _id: 1 } }
     ]).toArray();
 
-    const gerentesList = gerentes.map(g => g._id).filter(g => g);
+    const gerenteList = gerentes.map(g => g._id).filter(g => g);
 
-    console.log('  ✅ Gerentes encontrados:', gerentesList.length);
+    console.log('  ✅ Gerentes encontrados:', gerenteList.length);
 
-    res.json(gerentesList);
+    res.json(gerenteList);
   } catch (err) {
     console.error('  ❌ Error:', err.message);
     res.status(500).json({ error: err.message });
@@ -2083,9 +2020,9 @@ app.get('/flujo-valor/gerentes', async (req, res) => {
 });
 
 /* ================= FLUJO DE VALOR - GET FLUJOS POR GERENTE ================= */
-app.get('/flujo-valor/flujos/:gerente', async (req, res) => {
+app.get('/flujo-valor/lista/flujos/:gerente', async (req, res) => {
   try {
-    console.log('\n📊 GET /flujo-valor/flujos/:gerente');
+    console.log('\n📊 GET /flujo-valor/lista/flujos/:gerente');
     console.log('  Gerente:', req.params.gerente);
 
     const flujos = await mongoose.connection.collection('flujoValor').aggregate([
@@ -2094,11 +2031,11 @@ app.get('/flujo-valor/flujos/:gerente', async (req, res) => {
       { $sort: { _id: 1 } }
     ]).toArray();
 
-    const flujosList = flujos.map(f => f._id).filter(f => f);
+    const flujoList = flujos.map(f => f._id).filter(f => f);
 
-    console.log('  ✅ Flujos encontrados:', flujosList.length);
+    console.log('  ✅ Flujos encontrados:', flujoList.length);
 
-    res.json(flujosList);
+    res.json(flujoList);
   } catch (err) {
     console.error('  ❌ Error:', err.message);
     res.status(500).json({ error: err.message });
@@ -2106,9 +2043,9 @@ app.get('/flujo-valor/flujos/:gerente', async (req, res) => {
 });
 
 /* ================= FLUJO DE VALOR - GET CÉLULAS POR FLUJO ================= */
-app.get('/flujo-valor/celulas/:flujodeValor', async (req, res) => {
+app.get('/flujo-valor/lista/celulas/:flujodeValor', async (req, res) => {
   try {
-    console.log('\n📊 GET /flujo-valor/celulas/:flujodeValor');
+    console.log('\n📊 GET /flujo-valor/lista/celulas/:flujodeValor');
     console.log('  Flujo:', req.params.flujodeValor);
 
     const celulas = await mongoose.connection.collection('flujoValor').aggregate([
@@ -2129,9 +2066,9 @@ app.get('/flujo-valor/celulas/:flujodeValor', async (req, res) => {
 });
 
 /* ================= FLUJO DE VALOR - GET LÍDERES POR CÉLULA ================= */
-app.get('/flujo-valor/lideres/:celula', async (req, res) => {
+app.get('/flujo-valor/lista/lideres/:celula', async (req, res) => {
   try {
-    console.log('\n📊 GET /flujo-valor/lideres/:celula');
+    console.log('\n📊 GET /flujo-valor/lista/lideres/:celula');
     console.log('  Célula:', req.params.celula);
 
     const registro = await mongoose.connection.collection('flujoValor').findOne({
@@ -2169,11 +2106,11 @@ app.post('/flujo-valor', auth, async (req, res) => {
       return res.status(403).json({ error: 'No tienes permisos para crear flujos de valor' });
     }
 
-    const { gerente, flujodeValor, celula, liderTecnicoFlujoValor, liderTecnicoCelula, scrum, po } = req.body;
+    const { tipologia, gerente, flujodeValor, celula, liderTecnicoFlujoValor, liderTecnicoCelula, scrum, po } = req.body;
 
     // Validar campos requeridos
-    if (!gerente || !flujodeValor || !celula) {
-      return res.status(400).json({ error: 'Gerente, Flujo de Valor y Célula son requeridos' });
+    if (!tipologia || !gerente || !flujodeValor || !celula) {
+      return res.status(400).json({ error: 'Tipología, Gerente, Flujo de Valor y Célula son requeridos' });
     }
 
     // Validar que célula sea única
@@ -2185,6 +2122,7 @@ app.post('/flujo-valor', auth, async (req, res) => {
     }
 
     const nuevoFlujo = {
+      tipologia: tipologia.trim(),
       gerente: gerente.trim(),
       flujodeValor: flujodeValor.trim(),
       celula: celula.trim(),
@@ -2231,11 +2169,11 @@ app.put('/flujo-valor/:id', auth, async (req, res) => {
       return res.status(400).json({ error: 'ID de flujo inválido' });
     }
 
-    const { gerente, flujodeValor, celula, liderTecnicoFlujoValor, liderTecnicoCelula, scrum, po } = req.body;
+    const { tipologia, gerente, flujodeValor, celula, liderTecnicoFlujoValor, liderTecnicoCelula, scrum, po } = req.body;
 
     // Validar campos requeridos
-    if (!gerente || !flujodeValor || !celula) {
-      return res.status(400).json({ error: 'Gerente, Flujo de Valor y Célula son requeridos' });
+    if (!tipologia || !gerente || !flujodeValor || !celula) {
+      return res.status(400).json({ error: 'Tipología, Gerente, Flujo de Valor y Célula son requeridos' });
     }
 
     // Obtener el flujo actual
@@ -2259,6 +2197,7 @@ app.put('/flujo-valor/:id', auth, async (req, res) => {
     }
 
     const flujoActualizado = {
+      tipologia: tipologia.trim(),
       gerente: gerente.trim(),
       flujodeValor: flujodeValor.trim(),
       celula: celula.trim(),
