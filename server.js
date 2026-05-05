@@ -1,6 +1,7 @@
 require('dotenv').config();
 console.log("🔥 SERVER INICIANDO...");
 console.log('✅ SERVER.JS CORRECTO CARGADO (DEBUG) - flujo-valor debería existir');
+console.log('✅ server.js correcto cargado: ' + __filename);
 
 const express = require('express');
 const mongoose = require('mongoose');
