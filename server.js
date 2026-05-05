@@ -1,7 +1,5 @@
 require('dotenv').config();
 console.log("🔥 SERVER INICIANDO...");
-console.log('✅ SERVER.JS CORRECTO CARGADO (DEBUG) - flujo-valor debería existir');
-console.log('✅ server.js correcto cargado: ' + __filename);
 
 const express = require('express');
 const mongoose = require('mongoose');
@@ -189,6 +187,9 @@ const historialSchema = new mongoose.Schema({
 });
 
 const Historial = mongoose.model('Historial', historialSchema, 'historial_vencimientos');
+
+const registerFlujoValorRoutes = require('./routes/flujo-valor.routes');
+registerFlujoValorRoutes(app, { mongoose, auth });
 
 /* ================= AUTH MIDDLEWARE ================= */
 
