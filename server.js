@@ -851,59 +851,51 @@ app.post('/catalogo/importar', auth, esCoordinadorOAdmin, async (req, res) => {
 
     const normalizar = (texto) => (texto || '').trim().toLowerCase();
 
-    const unicosEnArchivoMap = new Map();
+const unicosEnArchivoMap = new Map();
 
-    for (const item of items) {
-      const tipificacion = item?.tipificacion?.trim();
-      const actividad = item?.actividad?.trim();
+for (const item of items) {
+  const tipificacion = item?.tipificacion?.trim();
+  const actividad = item?.actividad?.trim();
 
-      if (!tipificacion || !actividad) {
-        continue;
-      }
+  if (!tipificacion || !actividad) {
+    continue;
+  }
 
-      const clave = `${normalizar(tipificacion)}||${normalizar(actividad)}`;
+  const clave = normalizar(actividad);
 
-      if (!unicosEnArchivoMap.has(clave)) {
-        unicosEnArchivoMap.set(clave, {
-          tipificacion,
-          actividad,
-          diasHabiles: Number(item.diasHabiles) || 1,
-          horasMinimas: Number(item.horasMinimas) || 0,
-          horasMaximas: Number(item.horasMaximas) || 0,
-          observaciones: item?.observaciones?.trim() || '',
-          estado: 'oficial',
-          sugeridoPor: req.user.nombre,
-          rolSugeridor: req.user.rol,
-          fechaSugerencia: new Date(),
-          fechaCreacion: new Date(),
-          activo: true
-        });
-      }
-    }
-
-    const itemsUnicosArchivo = Array.from(unicosEnArchivoMap.values());
-
-    if (itemsUnicosArchivo.length === 0) {
-      return res.status(400).json({ error: "No se encontraron registros válidos para importar" });
-    }
-
-    const existentes = await Catalogo.find({
-      activo: true,
-      $or: itemsUnicosArchivo.map(item => ({
-        tipificacion: item.tipificacion,
-        actividad: item.actividad
-      }))
-    }).select('tipificacion actividad');
-
-    const existentesSet = new Set(
-      existentes.map(item => `${normalizar(item.tipificacion)}||${normalizar(item.actividad)}`)
-    );
-
-    const nuevos = itemsUnicosArchivo.filter(item => {
-      const clave = `${normalizar(item.tipificacion)}||${normalizar(item.actividad)}`;
-      return !existentesSet.has(clave);
+  if (!unicosEnArchivoMap.has(clave)) {
+    unicosEnArchivoMap.set(clave, {
+      tipificacion,
+      actividad,
+      diasHabiles: Number(item.diasHabiles) || 1,
+      horasMinimas: Number(item.horasMinimas) || 0,
+      horasMaximas: Number(item.horasMaximas) || 0,
+      observaciones: item?.observaciones?.trim() || '',
+      estado: 'oficial',
+      sugeridoPor: req.user.nombre,
+      rolSugeridor: req.user.rol,
+      fechaSugerencia: new Date(),
+      fechaCreacion: new Date(),
+      activo: true
     });
+  }
+}
 
+const itemsUnicosArchivo = Array.from(unicosEnArchivoMap.values());
+
+const existentes = await Catalogo.find({
+  activo: true,
+  actividad: { $in: itemsUnicosArchivo.map(item => item.actividad) }
+}).select('actividad');
+
+const existentesSet = new Set(
+  existentes.map(item => normalizar(item.actividad))
+);
+
+const nuevos = itemsUnicosArchivo.filter(item => {
+  const clave = normalizar(item.actividad);
+  return !existentesSet.has(clave);
+});
     if (nuevos.length === 0) {
       return res.status(400).json({
         error: "Todos los registros ya existen en la base de datos",
