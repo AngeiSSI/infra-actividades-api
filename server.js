@@ -188,8 +188,46 @@ const historialSchema = new mongoose.Schema({
 
 const Historial = mongoose.model('Historial', historialSchema, 'historial_vencimientos');
 
-const registerFlujoValorRoutes = require('./routes/flujo-valor.routes');
-registerFlujoValorRoutes(app, { mongoose, auth });
+const listaMaestraSchema = new mongoose.Schema({
+  tipo: {
+    type: String,
+    enum: [
+      'flujo_valor',
+      'gerente',
+      'celula',
+      'lider_tecnico',
+      'lider_tecnico_flujo_valor',
+      'scrum',
+      'po',
+      'arquitecto'
+    ],
+    required: true
+  },
+  nombre: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  descripcion: {
+    type: String,
+    default: '',
+    trim: true
+  },
+  activo: {
+    type: Boolean,
+    default: true
+  },
+  fechaCreacion: {
+    type: Date,
+    default: Date.now
+  },
+  fechaModificacion: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+const ListaMaestra = mongoose.model('ListaMaestra', listaMaestraSchema, 'listas_maestras');
 
 /* ================= AUTH MIDDLEWARE ================= */
 
@@ -1962,315 +2000,268 @@ app.post('/festivos/guardar', auth, esAdministrador, async (req, res) => {
   }
 });
 
-/* ================= FLUJO DE VALOR - GET ALL ================= */
-app.get('/flujo-valor', async (req, res) => {
+/* ================= LISTAS MAESTRAS - GET ================= */
+app.get('/listas-maestras', auth, async (req, res) => {
   try {
-    console.log('\n📊 GET /flujo-valor');
+    console.log('\n📚 GET /listas-maestras - User:', req.user.nombre);
+    console.log('  Query params:', req.query);
 
-    const flujos = await mongoose.connection.collection('flujoValor').find({}).toArray();
+    const { tipo, activo } = req.query;
+    const filtro = {};
 
-    console.log('  ✅ Total de flujos:', flujos.length);
-
-    res.json(flujos);
-  } catch (err) {
-    console.error('  ❌ Error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/* ================= FLUJO DE VALOR - GET TIPOLOGÍAS ================= */
-app.get('/flujo-valor/lista/tipologias', async (req, res) => {
-  try {
-    console.log('\n📊 GET /flujo-valor/lista/tipologias');
-
-    const tipologias = await mongoose.connection.collection('flujoValor').aggregate([
-      { $group: { _id: '$tipologia' } },
-      { $sort: { _id: 1 } }
-    ]).toArray();
-
-    const tipoList = tipologias.map(t => t._id).filter(t => t);
-
-    console.log('  ✅ Tipologías encontradas:', tipoList.length);
-
-    res.json(tipoList);
-  } catch (err) {
-    console.error('  ❌ Error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/* ================= FLUJO DE VALOR - GET GERENTES POR TIPOLOGÍA ================= */
-app.get('/flujo-valor/lista/gerentes/:tipologia', async (req, res) => {
-  try {
-    console.log('\n📊 GET /flujo-valor/lista/gerentes/:tipologia');
-    console.log('  Tipología:', req.params.tipologia);
-
-    const gerentes = await mongoose.connection.collection('flujoValor').aggregate([
-      { $match: { tipologia: req.params.tipologia } },
-      { $group: { _id: '$gerente' } },
-      { $sort: { _id: 1 } }
-    ]).toArray();
-
-    const gerenteList = gerentes.map(g => g._id).filter(g => g);
-
-    console.log('  ✅ Gerentes encontrados:', gerenteList.length);
-
-    res.json(gerenteList);
-  } catch (err) {
-    console.error('  ❌ Error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/* ================= FLUJO DE VALOR - GET FLUJOS POR GERENTE ================= */
-app.get('/flujo-valor/lista/flujos/:gerente', async (req, res) => {
-  try {
-    console.log('\n📊 GET /flujo-valor/lista/flujos/:gerente');
-    console.log('  Gerente:', req.params.gerente);
-
-    const flujos = await mongoose.connection.collection('flujoValor').aggregate([
-      { $match: { gerente: req.params.gerente } },
-      { $group: { _id: '$flujodeValor' } },
-      { $sort: { _id: 1 } }
-    ]).toArray();
-
-    const flujoList = flujos.map(f => f._id).filter(f => f);
-
-    console.log('  ✅ Flujos encontrados:', flujoList.length);
-
-    res.json(flujoList);
-  } catch (err) {
-    console.error('  ❌ Error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/* ================= FLUJO DE VALOR - GET CÉLULAS POR FLUJO ================= */
-app.get('/flujo-valor/lista/celulas/:flujodeValor', async (req, res) => {
-  try {
-    console.log('\n📊 GET /flujo-valor/lista/celulas/:flujodeValor');
-    console.log('  Flujo:', req.params.flujodeValor);
-
-    const celulas = await mongoose.connection.collection('flujoValor').aggregate([
-      { $match: { flujodeValor: req.params.flujodeValor } },
-      { $group: { _id: '$celula' } },
-      { $sort: { _id: 1 } }
-    ]).toArray();
-
-    const celebsList = celulas.map(c => c._id).filter(c => c);
-
-    console.log('  ✅ Células encontradas:', celebsList.length);
-
-    res.json(celebsList);
-  } catch (err) {
-    console.error('  ❌ Error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/* ================= FLUJO DE VALOR - GET LÍDERES POR CÉLULA ================= */
-app.get('/flujo-valor/lista/lideres/:celula', async (req, res) => {
-  try {
-    console.log('\n📊 GET /flujo-valor/lista/lideres/:celula');
-    console.log('  Célula:', req.params.celula);
-
-    const registro = await mongoose.connection.collection('flujoValor').findOne({
-      celula: req.params.celula
-    });
-
-    if (!registro) {
-      return res.status(404).json({ error: 'Célula no encontrada' });
+    if (tipo) {
+      filtro.tipo = tipo;
     }
 
-    console.log('  ✅ Líderes encontrados');
+    if (activo === 'true') {
+      filtro.activo = true;
+    } else if (activo === 'false') {
+      filtro.activo = false;
+    }
 
-    res.json({
-      liderTecnicoFlujoValor: registro.liderTecnicoFlujoValor,
-      liderTecnicoCelula: registro.liderTecnicoCelula,
-      scrum: registro.scrum,
-      po: registro.po
-    });
+    const items = await ListaMaestra.find(filtro).sort({ nombre: 1 });
+
+    console.log('  ✅ Listas maestras encontradas:', items.length);
+    res.json(items);
   } catch (err) {
     console.error('  ❌ Error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-/* ================= FLUJO DE VALOR - POST (AGREGAR) ================= */
-app.post('/flujo-valor', auth, async (req, res) => {
+/* ================= LISTAS MAESTRAS - POST ================= */
+app.post('/listas-maestras', auth, esCoordinadorOAdmin, async (req, res) => {
   try {
-    console.log('\n➕ POST /flujo-valor - User:', req.user.nombre);
+    console.log('\n➕ POST /listas-maestras - User:', req.user.nombre);
     console.log('  📤 Body recibido:', req.body);
 
-    const rol = req.user.rol?.toLowerCase();
-    const rolesPermitidos = ['administrador', 'super_admin', 'coordinador', 'senior'];
+    const { tipo, nombre, descripcion, activo } = req.body;
 
-    if (!rolesPermitidos.includes(rol)) {
-      return res.status(403).json({ error: 'No tienes permisos para crear flujos de valor' });
+    if (!tipo || !nombre) {
+      return res.status(400).json({ error: 'Los campos tipo y nombre son requeridos' });
     }
 
-    const { tipologia, gerente, flujodeValor, celula, liderTecnicoFlujoValor, liderTecnicoCelula, scrum, po } = req.body;
+    const tiposPermitidos = [
+      'flujo_valor',
+      'gerente',
+      'celula',
+      'lider_tecnico',
+      'lider_tecnico_flujo_valor',
+      'scrum',
+      'po',
+      'arquitecto'
+    ];
 
-    // Validar campos requeridos
-    if (!tipologia || !gerente || !flujodeValor || !celula) {
-      return res.status(400).json({ error: 'Tipología, Gerente, Flujo de Valor y Célula son requeridos' });
+    if (!tiposPermitidos.includes(tipo)) {
+      return res.status(400).json({ error: 'Tipo de lista maestra no válido' });
     }
 
-    // Validar que célula sea única
-    const celExistente = await mongoose.connection.collection('flujoValor').findOne({ celula });
-
-    if (celExistente) {
-      console.log('  ⚠️ Célula ya existe:', celula);
-      return res.status(400).json({ error: `La célula "${celula}" ya existe en el sistema` });
-    }
-
-    const nuevoFlujo = {
-      tipologia: tipologia.trim(),
-      gerente: gerente.trim(),
-      flujodeValor: flujodeValor.trim(),
-      celula: celula.trim(),
-      liderTecnicoFlujoValor: liderTecnicoFlujoValor?.trim() || '',
-      liderTecnicoCelula: liderTecnicoCelula?.trim() || '',
-      scrum: scrum?.trim() || '',
-      po: po?.trim() || '',
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-
-    console.log('  📤 Insertando flujo:', nuevoFlujo);
-
-    const resultado = await mongoose.connection.collection('flujoValor').insertOne(nuevoFlujo);
-
-    console.log('  ✅ Flujo agregado:', resultado.insertedId);
-
-    res.status(201).json({
-      mensaje: 'Flujo de valor agregado correctamente',
-      id: resultado.insertedId,
-      flujo: nuevoFlujo
+    const existente = await ListaMaestra.findOne({
+      tipo,
+      nombre: nombre.trim()
     });
+
+    if (existente) {
+      return res.status(400).json({ error: `Ya existe un registro con nombre "${nombre}" para el tipo "${tipo}"` });
+    }
+
+    const nuevoItem = await ListaMaestra.create({
+      tipo,
+      nombre: nombre.trim(),
+      descripcion: descripcion?.trim() || '',
+      activo: activo !== undefined ? activo : true,
+      fechaCreacion: new Date(),
+      fechaModificacion: new Date()
+    });
+
+    console.log('  ✅ Lista maestra creada:', nuevoItem._id);
+    res.status(201).json(nuevoItem);
   } catch (err) {
     console.error('  ❌ Error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-/* ================= FLUJO DE VALOR - PUT (ACTUALIZAR) ================= */
-app.put('/flujo-valor/:id', auth, async (req, res) => {
+/* ================= LISTAS MAESTRAS - PUT ================= */
+app.put('/listas-maestras/:id', auth, esCoordinadorOAdmin, async (req, res) => {
   try {
-    console.log('\n✏️ PUT /flujo-valor/:id - User:', req.user.nombre);
+    console.log('\n✏️ PUT /listas-maestras/:id - User:', req.user.nombre);
     console.log('  ID recibido:', req.params.id);
     console.log('  📤 Body recibido:', req.body);
 
-    const rol = req.user.rol?.toLowerCase();
-    const rolesPermitidos = ['administrador', 'super_admin', 'coordinador', 'senior'];
-
-    if (!rolesPermitidos.includes(rol)) {
-      return res.status(403).json({ error: 'No tienes permisos para editar flujos de valor' });
-    }
-
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ error: 'ID de flujo inválido' });
+      return res.status(400).json({ error: 'ID inválido' });
     }
 
-    const { tipologia, gerente, flujodeValor, celula, liderTecnicoFlujoValor, liderTecnicoCelula, scrum, po } = req.body;
+    const { nombre, descripcion, activo } = req.body;
 
-    // Validar campos requeridos
-    if (!tipologia || !gerente || !flujodeValor || !celula) {
-      return res.status(400).json({ error: 'Tipología, Gerente, Flujo de Valor y Célula son requeridos' });
+    if (!nombre) {
+      return res.status(400).json({ error: 'El campo nombre es requerido' });
     }
 
-    // Obtener el flujo actual
-    const flujoActual = await mongoose.connection.collection('flujoValor').findOne({
-      _id: new mongoose.Types.ObjectId(req.params.id)
+    const actual = await ListaMaestra.findById(req.params.id);
+
+    if (!actual) {
+      return res.status(404).json({ error: 'Registro no encontrado' });
+    }
+
+    const duplicado = await ListaMaestra.findOne({
+      _id: { $ne: req.params.id },
+      tipo: actual.tipo,
+      nombre: nombre.trim()
     });
 
-    if (!flujoActual) {
-      console.log('  ❌ Flujo no encontrado');
-      return res.status(404).json({ error: 'Flujo no encontrado' });
+    if (duplicado) {
+      return res.status(400).json({ error: `Ya existe un registro con nombre "${nombre}" para el tipo "${actual.tipo}"` });
     }
 
-    // Validar que célula sea única (si cambió)
-    if (flujoActual.celula !== celula) {
-      const celExistente = await mongoose.connection.collection('flujoValor').findOne({ celula });
-
-      if (celExistente) {
-        console.log('  ⚠️ Célula ya existe:', celula);
-        return res.status(400).json({ error: `La célula "${celula}" ya existe en el sistema` });
-      }
-    }
-
-    const flujoActualizado = {
-      tipologia: tipologia.trim(),
-      gerente: gerente.trim(),
-      flujodeValor: flujodeValor.trim(),
-      celula: celula.trim(),
-      liderTecnicoFlujoValor: liderTecnicoFlujoValor?.trim() || '',
-      liderTecnicoCelula: liderTecnicoCelula?.trim() || '',
-      scrum: scrum?.trim() || '',
-      po: po?.trim() || '',
-      updatedAt: new Date()
-    };
-
-    const resultado = await mongoose.connection.collection('flujoValor').findOneAndUpdate(
-      { _id: new mongoose.Types.ObjectId(req.params.id) },
-      { $set: flujoActualizado },
-      { returnDocument: 'after' }
+    const actualizado = await ListaMaestra.findByIdAndUpdate(
+      req.params.id,
+      {
+        nombre: nombre.trim(),
+        descripcion: descripcion?.trim() || '',
+        activo: activo !== undefined ? activo : actual.activo,
+        fechaModificacion: new Date()
+      },
+      { new: true, runValidators: false }
     );
 
-    if (!resultado.value) {
-      return res.status(404).json({ error: 'Flujo no encontrado' });
-    }
-
-    console.log('  ✅ Flujo actualizado:', req.params.id);
-
-    res.json({
-      mensaje: 'Flujo actualizado correctamente',
-      flujo: resultado.value
-    });
+    console.log('  ✅ Lista maestra actualizada:', actualizado._id);
+    res.json(actualizado);
   } catch (err) {
     console.error('  ❌ Error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-/* ================= FLUJO DE VALOR - DELETE ================= */
-app.delete('/flujo-valor/:id', auth, async (req, res) => {
+/* ================= LISTAS MAESTRAS - PATCH ESTADO ================= */
+app.patch('/listas-maestras/:id/estado', auth, esCoordinadorOAdmin, async (req, res) => {
   try {
-    console.log('\n🗑️ DELETE /flujo-valor/:id - User:', req.user.nombre);
+    console.log('\n🔄 PATCH /listas-maestras/:id/estado - User:', req.user.nombre);
     console.log('  ID recibido:', req.params.id);
-
-    const rol = req.user.rol?.toLowerCase();
-    const rolesPermitidos = ['administrador', 'super_admin', 'coordinador', 'senior'];
-
-    if (!rolesPermitidos.includes(rol)) {
-      return res.status(403).json({ error: 'No tienes permisos para eliminar flujos de valor' });
-    }
+    console.log('  📤 Body recibido:', req.body);
 
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ error: 'ID de flujo inválido' });
+      return res.status(400).json({ error: 'ID inválido' });
     }
 
-    const flujo = await mongoose.connection.collection('flujoValor').findOne({
-      _id: new mongoose.Types.ObjectId(req.params.id)
+    const { activo } = req.body;
+
+    if (typeof activo !== 'boolean') {
+      return res.status(400).json({ error: 'El campo activo debe ser booleano' });
+    }
+
+    const actualizado = await ListaMaestra.findByIdAndUpdate(
+      req.params.id,
+      {
+        activo,
+        fechaModificacion: new Date()
+      },
+      { new: true }
+    );
+
+    if (!actualizado) {
+      return res.status(404).json({ error: 'Registro no encontrado' });
+    }
+
+    console.log('  ✅ Estado actualizado:', actualizado._id, '->', actualizado.activo);
+    res.json(actualizado);
+  } catch (err) {
+    console.error('  ❌ Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= LISTAS MAESTRAS - DELETE ================= */
+app.delete('/listas-maestras/:id', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log('\n🗑️ DELETE /listas-maestras/:id - User:', req.user.nombre);
+    console.log('  ID recibido:', req.params.id);
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+
+    const eliminado = await ListaMaestra.findByIdAndDelete(req.params.id);
+
+    if (!eliminado) {
+      return res.status(404).json({ error: 'Registro no encontrado' });
+    }
+
+    console.log('  ✅ Registro eliminado:', eliminado._id);
+    res.json({ mensaje: 'Registro eliminado correctamente' });
+  } catch (err) {
+    console.error('  ❌ Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= LISTAS MAESTRAS - IMPORTAR ================= */
+app.post('/listas-maestras/importar', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log('\n📥 POST /listas-maestras/importar - User:', req.user.nombre);
+    console.log('  📤 Body recibido:', req.body);
+
+    const { tipo, items } = req.body;
+
+    if (!tipo || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Debes enviar tipo e items válidos para importar' });
+    }
+
+    const tiposPermitidos = [
+      'flujo_valor',
+      'gerente',
+      'celula',
+      'lider_tecnico',
+      'lider_tecnico_flujo_valor',
+      'scrum',
+      'po',
+      'arquitecto'
+    ];
+
+    if (!tiposPermitidos.includes(tipo)) {
+      return res.status(400).json({ error: 'Tipo de lista maestra no válido' });
+    }
+
+    const ahora = new Date();
+
+    const documentos = items
+      .filter(item => item?.nombre && item.nombre.trim())
+      .map(item => ({
+        tipo,
+        nombre: item.nombre.trim(),
+        descripcion: item.descripcion?.trim() || '',
+        activo: item.activo !== undefined ? item.activo : true,
+        fechaCreacion: ahora,
+        fechaModificacion: ahora
+      }));
+
+    if (documentos.length === 0) {
+      return res.status(400).json({ error: 'No hay registros válidos para importar' });
+    }
+
+    const nombresExistentes = await ListaMaestra.find({
+      tipo,
+      nombre: { $in: documentos.map(d => d.nombre) }
+    }).select('nombre');
+
+    const setExistentes = new Set(nombresExistentes.map(x => x.nombre));
+
+    const nuevosDocumentos = documentos.filter(d => !setExistentes.has(d.nombre));
+
+    if (nuevosDocumentos.length === 0) {
+      return res.status(400).json({ error: 'Todos los registros ya existen en la base de datos' });
+    }
+
+    const resultado = await ListaMaestra.insertMany(nuevosDocumentos);
+
+    console.log('  ✅ Registros importados:', resultado.length);
+
+    res.status(201).json({
+      mensaje: 'Importación realizada correctamente',
+      insertados: resultado.length,
+      omitidos: documentos.length - nuevosDocumentos.length
     });
-
-    if (!flujo) {
-      return res.status(404).json({ error: 'Flujo no encontrado' });
-    }
-
-    console.log('  📊 Flujo a eliminar:', flujo.celula);
-
-    const resultado = await mongoose.connection.collection('flujoValor').deleteOne({
-      _id: new mongoose.Types.ObjectId(req.params.id)
-    });
-
-    if (resultado.deletedCount === 0) {
-      return res.status(404).json({ error: 'Flujo no encontrado' });
-    }
-
-    console.log('  ✅ Flujo eliminado');
-
-    res.json({ mensaje: 'Flujo eliminado correctamente' });
   } catch (err) {
     console.error('  ❌ Error:', err.message);
     res.status(500).json({ error: err.message });
