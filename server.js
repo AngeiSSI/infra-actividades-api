@@ -229,6 +229,50 @@ const listaMaestraSchema = new mongoose.Schema({
 
 const ListaMaestra = mongoose.model('ListaMaestra', listaMaestraSchema, 'listas_maestras');
 
+const macroTareaSchema = new mongoose.Schema({
+  nombre: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  descripcion: {
+    type: String,
+    default: '',
+    trim: true
+  },
+  liderInfraestructuraId: {
+    type: String,
+    required: true
+  },
+  liderInfraestructuraNombre: {
+    type: String,
+    required: true
+  },
+  microTareas: [{
+    _id: { type: String, required: true },
+    actividad: { type: String, required: true },
+    catalogoId: { type: String, required: true },
+    diasHabiles: { type: Number, required: true },
+    horasMinimas: { type: Number, default: 0 },
+    horasMaximas: { type: Number, default: 0 }
+  }],
+  estado: {
+    type: String,
+    enum: ['activa', 'inactiva'],
+    default: 'activa'
+  },
+  fechaCreacion: {
+    type: Date,
+    default: Date.now
+  },
+  fechaModificacion: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+const MacroTarea = mongoose.model('MacroTarea', macroTareaSchema, 'macro_tareas');
+
 /* ================= AUTH MIDDLEWARE ================= */
 
 function auth(req, res, next) {
@@ -1916,49 +1960,92 @@ app.delete('/asignaciones/:id', auth, async (req, res) => {
   }
 });
 
+/* ================= MACRO TAREAS - POST (CREAR) ================= */
+app.post('/macro-tareas', auth, async (req, res) => {
+  try {
+    console.log("\n➕ POST /macro-tareas - User:", req.user.nombre);
+    console.log("  📤 Datos recibidos:", req.body);
+
+    const { nombre, descripcion, liderInfraestructuraId, liderInfraestructuraNombre, microTareas } = req.body;
+
+    if (!nombre || !liderInfraestructuraId || !liderInfraestructuraNombre || !microTareas || microTareas.length === 0) {
+      return res.status(400).json({ error: "Faltan campos requeridos (nombre, liderInfraestructuraId, liderInfraestructuraNombre, microTareas)" });
+    }
+
+    const nueva = await MacroTarea.create({
+      nombre,
+      descripcion: descripcion || '',
+      liderInfraestructuraId,
+      liderInfraestructuraNombre,
+      microTareas,
+      estado: 'activa',
+      fechaCreacion: new Date(),
+      fechaModificacion: new Date()
+    });
+
+    console.log("  ✅ Macro tarea creada:", nueva._id);
+    console.log("  👤 Líder:", nueva.liderInfraestructuraNombre);
+    console.log("  📋 Micro tareas:", nueva.microTareas.length);
+
+    res.status(201).json(nueva);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= MACRO TAREAS - PUT (ACTUALIZAR) ================= */
+app.put('/macro-tareas/:id', auth, async (req, res) => {
+  try {
+    console.log("\n✏️ PUT /macro-tareas/:id - User:", req.user.nombre);
+    console.log("  📤 Datos recibidos:", req.body);
+
+    const macroTarea = await MacroTarea.findByIdAndUpdate(
+      req.params.id,
+      { ...req.body, fechaModificacion: new Date() },
+      { new: true, runValidators: false }
+    );
+
+    if (!macroTarea) {
+      return res.status(404).json({ error: "Macro tarea no encontrada" });
+    }
+
+    console.log("  ✅ Macro tarea actualizada:", macroTarea._id);
+    res.json(macroTarea);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= MACRO TAREAS - DELETE (ELIMINAR) ================= */
+app.delete('/macro-tareas/:id', auth, async (req, res) => {
+  try {
+    console.log("\n🗑️ DELETE /macro-tareas/:id - User:", req.user.nombre);
+
+    const macroTarea = await MacroTarea.findByIdAndDelete(req.params.id);
+
+    if (!macroTarea) {
+      return res.status(404).json({ error: "Macro tarea no encontrada" });
+    }
+
+    console.log("  ✅ Macro tarea eliminada:", req.params.id);
+    res.json({ mensaje: "Macro tarea eliminada correctamente" });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* ================= MACRO TAREAS - GET ================= */
 app.get('/macro-tareas', auth, async (req, res) => {
   try {
     console.log("\n📋 GET /macro-tareas - User:", req.user.nombre);
 
-    const macroTareas = await Actividad.aggregate([
-      {
-        $group: {
-          _id: "$proyecto",
-          totalActividades: { $sum: 1 },
-          horasTotales: { $sum: "$horasAcumuladas" },
-          actividades: {
-            $push: {
-              id: "$_id",
-              actividad: "$actividadCatalogo",
-              tipificacion: "$tipificacion",
-              estado: "$estado",
-              lider: "$lider",
-              fechaCierre: "$fechaCierre"
-            }
-          }
-        }
-      },
-      {
-        $project: {
-          _id: 0,
-          proyecto: "$_id",
-          totalActividades: 1,
-          horasTotales: 1,
-          actividades: 1
-        }
-      },
-      {
-        $sort: {
-          proyecto: 1
-        }
-      }
-    ]);
+    const macroTareas = await MacroTarea.find().sort({ fechaCreacion: -1 });
 
     console.log("  ✅ Macro tareas enviadas:", macroTareas.length);
-
     res.json(macroTareas);
-
   } catch (err) {
     console.error("  ❌ Error:", err.message);
     res.status(500).json({ error: err.message });
