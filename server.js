@@ -1916,6 +1916,55 @@ app.delete('/asignaciones/:id', auth, async (req, res) => {
   }
 });
 
+/* ================= MACRO TAREAS - GET ================= */
+app.get('/macro-tareas', auth, async (req, res) => {
+  try {
+    console.log("\n📋 GET /macro-tareas - User:", req.user.nombre);
+
+    const macroTareas = await Actividad.aggregate([
+      {
+        $group: {
+          _id: "$proyecto",
+          totalActividades: { $sum: 1 },
+          horasTotales: { $sum: "$horasAcumuladas" },
+          actividades: {
+            $push: {
+              id: "$_id",
+              actividad: "$actividadCatalogo",
+              tipificacion: "$tipificacion",
+              estado: "$estado",
+              lider: "$lider",
+              fechaCierre: "$fechaCierre"
+            }
+          }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          proyecto: "$_id",
+          totalActividades: 1,
+          horasTotales: 1,
+          actividades: 1
+        }
+      },
+      {
+        $sort: {
+          proyecto: 1
+        }
+      }
+    ]);
+
+    console.log("  ✅ Macro tareas enviadas:", macroTareas.length);
+
+    res.json(macroTareas);
+
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* ================= FESTIVOS - GET ================= */
 app.get('/festivos', async (req, res) => {
   try {
