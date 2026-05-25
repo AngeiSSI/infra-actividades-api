@@ -97,11 +97,20 @@ const catalogoSchema = new mongoose.Schema({
 const Catalogo = mongoose.model('Catalogo', catalogoSchema, 'catalogos');
 
 const actividadSchema = new mongoose.Schema({
+  nombre: String,  // ✅ NUEVO: nombre de la micro tarea
   lider: String,
   proyecto: String,
   tipificacion: String,
   actividadCatalogo: String,
   descripcion: String,
+  macroTareaId: { type: String, default: '' },  // ✅ NUEVO
+  macroTareaNombre: { type: String, default: '' },  // ✅ NUEVO
+  fechaInicio: { type: String, default: '' },  // ✅ NUEVO
+  diasHabiles: { type: Number, default: 0 },  // ✅ NUEVO
+  horasMinimas: { type: Number, default: 0 },  // ✅ NUEVO
+  horasMaximas: { type: Number, default: 0 },  // ✅ NUEVO
+  esUltima: { type: Boolean, default: false },  // ✅ NUEVO
+  indiceSecuencia: { type: Number, default: 0 },  // ✅ NUEVO
   fechaCreacion: { type: Date, default: Date.now },
   fechaModificacion: { type: Date, default: Date.now, required: true },
   fechaCierre: Date,
@@ -1231,36 +1240,70 @@ app.get('/actividades', auth, async (req, res) => {
 app.post('/actividades', auth, async (req, res) => {
   try {
     console.log("\n✏️ POST /actividades - User:", req.user.nombre);
+    console.log("  📤 Body recibido:", JSON.stringify(req.body, null, 2));
 
-    const { tipificacion, actividadCatalogo } = req.body;
+    // ✅ ACEPTAR AMBOS FORMATOS: antiguo (con catalogoId) y nuevo (para macro tareas)
+    const { 
+      nombre,
+      lider,
+      macroTareaId,
+      macroTareaNombre,
+      fechaInicio,
+      fechaFin = '',
+      estado = 'pendiente',
+      diasHabiles = 0,
+      horasMinimas = 0,
+      horasMaximas = 0,
+      esUltima = false,
+      indiceSecuencia = 0,
+      tipificacion = 'Micro Tarea',
+      actividadCatalogo,
+      proyecto
+    } = req.body;
 
-    const cat = await Catalogo.findOne({
-      tipificacion,
-      actividad: actividadCatalogo,
-      estado: 'oficial'
-    });
-
-    if (!cat) {
-      return res.status(400).json({ error: "Actividad no existe en catálogo oficial" });
+    // ✅ VALIDACIÓN: al menos nombre y lider
+    if (!nombre || !lider) {
+      return res.status(400).json({ 
+        error: "Faltan campos requeridos: nombre y lider" 
+      });
     }
 
-    const fechaCreacion = new Date();
-    const fechaCierre = sumarDiasHabiles(fechaCreacion, cat.diasHabiles);
-
     const nueva = await Actividad.create({
-      ...req.body,
-      lider: req.user.nombre,
-      fechaCreacion,
-      fechaModificacion: fechaCreacion,
-      fechaCierre
+      nombre,
+      lider,
+      macroTareaId: macroTareaId || '',
+      macroTareaNombre: macroTareaNombre || '',
+      tipificacion,
+      actividadCatalogo: actividadCatalogo || nombre,
+      proyecto: proyecto || '',
+      descripcion: '',
+      fechaCreacion: new Date(),
+      fechaModificacion: new Date(),
+      fechaCierre: fechaFin || new Date(),
+      estado,
+      estadoCaso: 'no aplica',
+      horas: 0,
+      horasAcumuladas: 0,
+      horasMes: 0,
+      diasHabiles,
+      horasMinimas,
+      horasMaximas,
+      esUltima,
+      indiceSecuencia,
+      fechaInicio: fechaInicio || '',
+      observaciones: [],
+      justificacionCierre: {}
     });
 
     console.log("  ✅ Actividad creada:", nueva._id);
-    console.log("  📅 fechaModificacion asignada:", nueva.fechaModificacion);
+    console.log("  📋 Nombre:", nueva.nombre);
+    console.log("  👤 Líder:", nueva.lider);
+    console.log("  🔗 Macro Tarea ID:", nueva.macroTareaId || 'N/A');
 
     res.status(201).json(nueva);
   } catch (err) {
     console.error("  ❌ Error:", err.message);
+    console.error("  ❌ Stack:", err.stack);
     res.status(500).json({ error: err.message });
   }
 });
