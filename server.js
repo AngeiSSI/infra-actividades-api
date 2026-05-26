@@ -97,7 +97,7 @@ const catalogoSchema = new mongoose.Schema({
 const Catalogo = mongoose.model('Catalogo', catalogoSchema, 'catalogos');
 
 const actividadSchema = new mongoose.Schema({
-  nombre: String,  // ✅ NUEVO: nombre de la micro tarea
+  nombre: String,  // ✅ nombre de la micro tarea
   lider: String,
   proyecto: String,
   tipificacion: String,
@@ -1242,23 +1242,23 @@ app.post('/actividades', auth, async (req, res) => {
     console.log("\n✏️ POST /actividades - User:", req.user.nombre);
     console.log("  📤 Body recibido:", JSON.stringify(req.body, null, 2));
 
-    // ✅ ACEPTAR AMBOS FORMATOS: antiguo (con catalogoId) y nuevo (para macro tareas)
+    // ✅ ACEPTAR AMBOS FORMATOS: antiguo y nuevo (para macro tareas)
     const { 
       nombre,
       lider,
-      macroTareaId,
-      macroTareaNombre,
-      fechaInicio,
+      macroTareaId = '',
+      macroTareaNombre = '',
+      proyecto = '',
+      tipificacion = 'Micro Tarea',
+      actividadCatalogo = '',
+      fechaInicio = '',
       fechaFin = '',
       estado = 'pendiente',
       diasHabiles = 0,
       horasMinimas = 0,
       horasMaximas = 0,
       esUltima = false,
-      indiceSecuencia = 0,
-      tipificacion = 'Micro Tarea',
-      actividadCatalogo,
-      proyecto
+      indiceSecuencia = 0
     } = req.body;
 
     // ✅ VALIDACIÓN: al menos nombre y lider
@@ -1271,12 +1271,14 @@ app.post('/actividades', auth, async (req, res) => {
     const nueva = await Actividad.create({
       nombre,
       lider,
-      macroTareaId: macroTareaId || '',
-      macroTareaNombre: macroTareaNombre || '',
+      macroTareaId,
+      macroTareaNombre,
+      proyecto,
       tipificacion,
       actividadCatalogo: actividadCatalogo || nombre,
-      proyecto: proyecto || '',
       descripcion: '',
+      fechaInicio,
+      fechaFin: fechaFin || new Date(),
       fechaCreacion: new Date(),
       fechaModificacion: new Date(),
       fechaCierre: fechaFin || new Date(),
@@ -1290,7 +1292,6 @@ app.post('/actividades', auth, async (req, res) => {
       horasMaximas,
       esUltima,
       indiceSecuencia,
-      fechaInicio: fechaInicio || '',
       observaciones: [],
       justificacionCierre: {}
     });
@@ -1299,6 +1300,8 @@ app.post('/actividades', auth, async (req, res) => {
     console.log("  📋 Nombre:", nueva.nombre);
     console.log("  👤 Líder:", nueva.lider);
     console.log("  🔗 Macro Tarea ID:", nueva.macroTareaId || 'N/A');
+    console.log("  📅 Fecha Inicio:", nueva.fechaInicio);
+    console.log("  📅 Fecha Fin:", nueva.fechaFin);
 
     res.status(201).json(nueva);
   } catch (err) {
