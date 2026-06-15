@@ -2551,6 +2551,375 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', secret: SECRET });
 });
 
+<<<<<<< HEAD
+=======
+/* ======================= NUEVOS ENDPOINTS ======================= */
+
+// ================= DASHBOARD INICIO - GET =================
+app.get('/api/inicio/dashboard', auth, async (req, res) => {
+  try {
+    console.log("\n📊 GET /api/inicio/dashboard - User:", req.user.nombre);
+
+    const rol = req.user.rol?.toLowerCase();
+    const usuarioData = await User.findById(req.user.id).select('-password');
+
+    // Obtener actividades
+    const misActividades = await Actividad.find({ lider: req.user.nombre });
+    const actividadesVencidas = misActividades.filter(a => {
+      return a.estado !== 'cerrado' && new Date(a.fechaCierre) < new Date();
+    });
+
+    // KPIs personalizados
+    let kpis = [];
+    if (rol === 'lider') {
+      kpis = [
+        { label: 'Mis Actividades', valor: misActividades.length, subtitulo: 'Abiertas', icono: '📋', color: '#457B9D' },
+        { label: 'Actividades de Mi Grupo', valor: 87, subtitulo: 'En Progreso', icono: '👥', color: '#06A77D' },
+        { label: 'Actividades Vencidas', valor: actividadesVencidas.length, subtitulo: 'Vencidas', icono: '⚠️', color: '#E63946' },
+        { label: 'Próximas a Vencer', valor: 8, subtitulo: 'Próximos 7 días', icono: '📅', color: '#F77F00' },
+        { label: 'Proyectos Activos', valor: 12, subtitulo: 'Asignados', icono: '📁', color: '#9C27B0' },
+        { label: 'Sin Seguimiento', valor: 8, subtitulo: 'Requieren gestión', icono: '⏱️', color: '#FF5252' }
+      ];
+    }
+
+    res.json({
+      success: true,
+      usuario: {
+        nombre: usuarioData?.nombre || req.user.nombre,
+        rol: rol,
+        email: usuarioData?.email
+      },
+      kpis,
+      misPendientes: misActividades.slice(0, 5).map(a => ({
+        id: a._id,
+        descripcion: a.actividadCatalogo,
+        proyecto: a.proyecto,
+        fecha: a.fechaCierre,
+        prioridad: 'Alta'
+      })),
+      actividadesProximas: [],
+      misProyectos: [],
+      alertas: [],
+      ultimasGestiones: [],
+      datosEstadoActividades: { datos: [] },
+      datosSemaforoGestion: { datos: [] }
+    });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ================= APROBACIONES DE CIERRE - GET =================
+app.get('/api/aprobaciones-cierre', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n📋 GET /api/aprobaciones-cierre - User:", req.user.nombre);
+
+    const { proyecto, feature, responsable, macroTarea, estado, fechaDesde, fechaHasta } = req.query;
+    let filtro = {};
+
+    if (proyecto) filtro.proyecto = proyecto;
+    if (responsable) filtro['responsable.id'] = responsable;
+    if (estado === 'Pendientes') filtro.estado = 'Pendiente';
+    if (estado === 'Aprobadas') filtro.estado = 'Aprobado';
+    if (estado === 'Rechazadas') filtro.estado = 'Rechazado';
+
+    const solicitudes = await mongoose.connection.collection('solicitudes_cierre').find(filtro).toArray();
+
+    res.json({
+      success: true,
+      data: {
+        solicitudes,
+        total: solicitudes.length
+      }
+    });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================= APROBACIONES DE CIERRE - APROBAR =================
+app.post('/api/aprobaciones-cierre/:id/aprobar', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n✅ POST /api/aprobaciones-cierre/:id/aprobar - User:", req.user.nombre);
+
+    const solicitud = await mongoose.connection.collection('solicitudes_cierre').findOneAndUpdate(
+      { _id: new mongoose.Types.ObjectId(req.params.id) },
+      {
+        $set: {
+          estado: 'Aprobado',
+          aprobadoPor: req.user.nombre,
+          fechaAprobacion: new Date()
+        }
+      },
+      { returnDocument: 'after' }
+    );
+
+    res.json({ success: true, data: solicitud });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ================= APROBACIONES DE CIERRE - RECHAZAR =================
+app.post('/api/aprobaciones-cierre/:id/rechazar', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n❌ POST /api/aprobaciones-cierre/:id/rechazar - User:", req.user.nombre);
+
+    const { motivo } = req.body;
+    const solicitud = await mongoose.connection.collection('solicitudes_cierre').findOneAndUpdate(
+      { _id: new mongoose.Types.ObjectId(req.params.id) },
+      {
+        $set: {
+          estado: 'Rechazado',
+          rechazadoPor: req.user.nombre,
+          motivoRechazo: motivo,
+          fechaRechazo: new Date()
+        }
+      },
+      { returnDocument: 'after' }
+    );
+
+    res.json({ success: true, data: solicitud });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ================= ACTIVIDADES - AGRUPADAS =================
+app.get('/api/actividades/agrupadas', auth, async (req, res) => {
+  try {
+    console.log("\n📊 GET /api/actividades/agrupadas - User:", req.user.nombre);
+
+    const actividades = await Actividad.find({});
+
+    // Agrupar por proyecto y macro tarea
+    const agrupadas = {};
+    actividades.forEach(act => {
+      if (!agrupadas[act.proyecto]) {
+        agrupadas[act.proyecto] = { nombre: act.proyecto, macroTareas: {} };
+      }
+      if (!agrupadas[act.proyecto].macroTareas[act.macroTarea]) {
+        agrupadas[act.proyecto].macroTareas[act.macroTarea] = { nombre: act.macroTarea, actividades: [] };
+      }
+      agrupadas[act.proyecto].macroTareas[act.macroTarea].actividades.push(act);
+    });
+
+    res.json({ success: true, data: Object.values(agrupadas) });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================= ASIGNACIONES - CAPACIDAD =================
+app.get('/api/asignaciones/capacidad', auth, async (req, res) => {
+  try {
+    console.log("\n📊 GET /api/asignaciones/capacidad - User:", req.user.nombre);
+
+    const { proyecto, estado, rangoCapacidad } = req.query;
+
+    const lideres = await User.find({ rol: 'Líder' });
+
+    const lideresCon Capacidad = lideres.map(lider => {
+      const capacidadAsignada = Math.random() * 150; // Simulado
+      return {
+        _id: lider._id,
+        nombre: lider.nombre,
+        capacidadTotal: 100,
+        capacidadAsignada: Math.round(capacidadAsignada * 10) / 10,
+        capacidadDisponible: Math.round((100 - capacidadAsignada) * 10) / 10,
+        estado: capacidadAsignada < 100 ? 'Disponible' : capacidadAsignada < 120 ? 'Capacidad Comprometida' : 'Sobreasignado'
+      };
+    });
+
+    res.json({ success: true, data: { lideres: lideresConCapacidad, total: lideres.length } });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================= ASIGNACIONES PROYECTOS - CREAR =================
+app.post('/api/asignaciones-proyectos', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n✅ POST /api/asignaciones-proyectos - User:", req.user.nombre);
+
+    const datosAsignacion = req.body;
+
+    const nuevaAsignacion = new Asignacion({
+      ...datosAsignacion,
+      fechaCreacion: new Date(),
+      creadoPor: req.user.nombre,
+      estado: 'Vigente'
+    });
+
+    await nuevaAsignacion.save();
+
+    res.json({ success: true, data: nuevaAsignacion });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ================= MACRO TAREAS - CREAR =================
+app.post('/api/macro-tareas', auth, async (req, res) => {
+  try {
+    console.log("\n✅ POST /api/macro-tareas - User:", req.user.nombre);
+
+    const datos = req.body;
+
+    const nuevaMacroTarea = new MacroTarea({
+      ...datos,
+      estado: 'Propuesta (Pendiente Aprobación)',
+      fechaCreacion: new Date(),
+      creadoPor: req.user.nombre
+    });
+
+    await nuevaMacroTarea.save();
+
+    res.json({ success: true, data: nuevaMacroTarea });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ================= CATALOGO - CREAR ACTIVIDAD =================
+app.post('/api/catalogo', auth, async (req, res) => {
+  try {
+    console.log("\n✅ POST /api/catalogo - User:", req.user.nombre);
+
+    const { tipificacion, actividad, diasHabiles, horasMinimas, horasMaximas } = req.body;
+
+    const nuevaActividad = new CatalogoActividad({
+      tipificacion,
+      actividad,
+      diasHabiles,
+      horasMinimas,
+      horasMaximas,
+      estado: 'Pendiente',
+      fechaCreacion: new Date(),
+      creadoPor: req.user.nombre
+    });
+
+    await nuevaActividad.save();
+
+    res.json({ success: true, data: nuevaActividad });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ================= CATALOGO - APROBAR =================
+app.patch('/api/catalogo/:id/aprobar', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n✅ PATCH /api/catalogo/:id/aprobar - User:", req.user.nombre);
+
+    const actividad = await CatalogoActividad.findByIdAndUpdate(
+      req.params.id,
+      {
+        estado: 'Vigente',
+        aprobadoPor: req.user.nombre,
+        fechaAprobacion: new Date()
+      },
+      { new: true }
+    );
+
+    res.json({ success: true, data: actividad });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ================= CATALOGO - RECHAZAR =================
+app.patch('/api/catalogo/:id/rechazar', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n❌ PATCH /api/catalogo/:id/rechazar - User:", req.user.nombre);
+
+    const { observaciones } = req.body;
+
+    const actividad = await CatalogoActividad.findByIdAndUpdate(
+      req.params.id,
+      {
+        estado: 'Rechazado',
+        rechazadoPor: req.user.nombre,
+        observaciones,
+        fechaRechazo: new Date()
+      },
+      { new: true }
+    );
+
+    res.json({ success: true, data: actividad });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ================= ACTIVIDADES - CREAR GESTIÓN =================
+app.post('/api/actividades/:id/gestiones', auth, async (req, res) => {
+  try {
+    console.log("\n✅ POST /api/actividades/:id/gestiones - User:", req.user.nombre);
+
+    const { comentario, horas, tipo } = req.body;
+
+    const nuevaGestion = {
+      _id: new mongoose.Types.ObjectId(),
+      fecha: new Date(),
+      usuario: req.user.nombre,
+      comentario,
+      horas,
+      tipo
+    };
+
+    const actividad = await Actividad.findByIdAndUpdate(
+      req.params.id,
+      {
+        $push: { gestiones: nuevaGestion },
+        ultimaGestion: new Date()
+      },
+      { new: true }
+    );
+
+    res.json({ success: true, data: actividad });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ================= ACTIVIDADES - CERRAR =================
+app.post('/api/actividades/:id/cerrar', auth, async (req, res) => {
+  try {
+    console.log("\n✅ POST /api/actividades/:id/cerrar - User:", req.user.nombre);
+
+    const actividad = await Actividad.findByIdAndUpdate(
+      req.params.id,
+      {
+        estado: 'Cerrada',
+        fechaCierreReal: new Date(),
+        cierradoPor: req.user.nombre
+      },
+      { new: true }
+    );
+
+    res.json({ success: true, data: actividad });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+console.log("\n✅ Nuevos endpoints agregados correctamente");
+
+>>>>>>> b1a8601 (Reportes)
 /* ================= SERVER ================= */
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
