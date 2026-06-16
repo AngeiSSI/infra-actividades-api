@@ -7,20 +7,8 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const cron = require('node-cron');
 const axios = require('axios');
-const { enviarAlCanalTeams, generarTablaTeams } = require('./notificaciones-teams');
-
+const ExcelJS = require('exceljs');
 const app = express();
-// Debug: Listar todos los endpoints
-app.get('/_debug/routes', (req, res) => {
-  const routes = [];
-  app._router.stack.forEach(middleware => {
-    if (middleware.route) {
-      routes.push(`${Object.keys(middleware.route.methods)[0].toUpperCase()} ${middleware.route.path}`);
-    }
-  });
-  res.json(routes.filter(r => r.includes('festivos')).sort());
-});
-
 const SECRET = "infra-secret-key";
 
 console.log("🔐 SECRET:", SECRET);
@@ -77,6 +65,20 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', userSchema, 'users');
 
+const auditoriaSchema = new mongoose.Schema({
+  usuario: String,
+  fecha: { type: Date, default: Date.now },
+  modulo: String,
+  accion: String,
+  registroId: String,
+  valorAnterior: mongoose.Schema.Types.Mixed,
+  valorNuevo: mongoose.Schema.Types.Mixed,
+  razon: String,
+  tipoAusentismo: { type: String, enum: ['Vacaciones', 'Incapacidad', 'Licencia', 'Capacitación', 'Otro'], default: null }
+});
+
+const Auditoria = mongoose.model('Auditoria', auditoriaSchema, 'auditoria');
+
 const catalogoSchema = new mongoose.Schema({
   tipificacion: String,
   actividad: String,
@@ -97,20 +99,22 @@ const catalogoSchema = new mongoose.Schema({
 const Catalogo = mongoose.model('Catalogo', catalogoSchema, 'catalogos');
 
 const actividadSchema = new mongoose.Schema({
-  nombre: String,  // ✅ nombre de la micro tarea
+  nombre: String,
   lider: String,
+  liderSustituto: { type: String, default: null },
+  tipoSustituto: { type: String, enum: ['Temporal', 'Definitivo'], default: null },
   proyecto: String,
   tipificacion: String,
   actividadCatalogo: String,
   descripcion: String,
-  macroTareaId: { type: String, default: '' },  // ✅ NUEVO
-  macroTareaNombre: { type: String, default: '' },  // ✅ NUEVO
-  fechaInicio: { type: String, default: '' },  // ✅ NUEVO
-  diasHabiles: { type: Number, default: 0 },  // ✅ NUEVO
-  horasMinimas: { type: Number, default: 0 },  // ✅ NUEVO
-  horasMaximas: { type: Number, default: 0 },  // ✅ NUEVO
-  esUltima: { type: Boolean, default: false },  // ✅ NUEVO
-  indiceSecuencia: { type: Number, default: 0 },  // ✅ NUEVO
+  macroTareaId: { type: String, default: '' },
+  macroTareaNombre: { type: String, default: '' },
+  fechaInicio: { type: String, default: '' },
+  diasHabiles: { type: Number, default: 0 },
+  horasMinimas: { type: Number, default: 0 },
+  horasMaximas: { type: Number, default: 0 },
+  esUltima: { type: Boolean, default: false },
+  indiceSecuencia: { type: Number, default: 0 },
   fechaCreacion: { type: Date, default: Date.now },
   fechaModificacion: { type: Date, default: Date.now, required: true },
   fechaCierre: Date,
@@ -150,6 +154,9 @@ const Acceso = mongoose.model('Acceso', accesoSchema, 'accesos');
 
 const asignacionSchema = new mongoose.Schema({
   liderAsignado: String,
+  liderSustituto: { type: String, default: null },
+  tipoSustituto: { type: String, enum: ['Temporal', 'Definitivo'], default: null },
+  razonSustituto: { type: String, enum: ['Vacaciones', 'Incapacidad', 'Licencia', 'Capacitación', 'Otro'], default: null },
   proyecto: String,
   idFeature: String,
   tipologia: String,
@@ -312,7 +319,7 @@ function auth(req, res, next) {
 
 function esCoordinadorOAdmin(req, res, next) {
   const rol = req.user?.rol?.toLowerCase();
-  if (rol !== 'coordinador' && rol !== 'administrador' && rol !== 'super_admin') {
+  if (rol !== 'coordinador' && rol !== 'administrador' && rol !== 'super_admin' && rol !== 'pmo') {
     return res.status(403).json({ error: "Acceso denegado - requiere permisos de Coordinador o Administrador" });
   }
   next();
@@ -335,6 +342,25 @@ function esSuperAdmin(req, res, next) {
 }
 
 /* ================= FUNCIONES AUXILIARES ================= */
+
+async function registrarAuditoria(usuario, modulo, accion, registroId, valorAnterior, valorNuevo, razon = null, tipoAusentismo = null) {
+  try {
+    await Auditoria.create({
+      usuario,
+      modulo,
+      accion,
+      registroId,
+      valorAnterior,
+      valorNuevo,
+      razon,
+      tipoAusentismo,
+      fecha: new Date()
+    });
+    console.log("  ✅ Auditoría registrada:", accion);
+  } catch (err) {
+    console.error("  ⚠️ Error registrando auditoría:", err.message);
+  }
+}
 
 function calcularDiasHabiles(fechaInicio, fechaFin) {
   let diasHabiles = 0;
@@ -509,11 +535,14 @@ app.post('/login', async (req, res) => {
 
     if (!user) {
       console.log("  ❌ Usuario NO encontrado");
+      await registrarAuditoria('SISTEMA', 'login', 'intento_fallido', email, null, { email });
       return res.status(401).json({ error: "Credenciales inválidas" });
     }
 
     console.log("  ✅ Usuario encontrado:", user.nombre);
     console.log("  🔐 primeraVez en BD:", user.primeraVez);
+
+    await registrarAuditoria(user.nombre, 'login', 'login_exitoso', user._id, null, { email, rol: user.rol });
 
     const token = jwt.sign(
       { id: user._id, nombre: user.nombre, rol: user.rol, grupo: user.grupo },
@@ -564,6 +593,8 @@ app.post('/cambiar-password-primera-vez', auth, async (req, res) => {
       return res.status(404).json({ error: "Usuario no encontrado" });
     }
 
+    await registrarAuditoria(req.user.nombre, 'usuarios', 'cambio_password_primera_vez', req.user.id, null, { usuario: usuario.nombre });
+
     console.log("  ✅ Contraseña actualizada:", usuario._id);
     console.log("  🔐 primeraVez actualizado a:", usuario.primeraVez);
     res.json({ mensaje: "Contraseña cambiada correctamente", usuario });
@@ -588,9 +619,10 @@ app.post('/recuperar-password', async (req, res) => {
     const usuario = await User.findOne({ email });
 
     if (!usuario) {
-      return res.json({ 
+      res.json({ 
         mensaje: "Si el email existe, recibirá instrucciones para resetear su contraseña" 
       });
+      return;
     }
 
     console.log("  ✅ Usuario encontrado:", usuario.nombre);
@@ -601,6 +633,8 @@ app.post('/recuperar-password', async (req, res) => {
       SECRET,
       { expiresIn: '1h' }
     );
+
+    await registrarAuditoria(usuario.nombre, 'login', 'recuperar_password', usuario._id, null, { email });
 
     console.log("  🔐 Token de reset generado:", tokenReset.substring(0, 50) + "...");
 
@@ -648,6 +682,8 @@ app.post('/resetear-password', async (req, res) => {
       return res.status(404).json({ error: "Usuario no encontrado" });
     }
 
+    await registrarAuditoria(usuario.nombre, 'usuarios', 'resetear_password', usuario._id, null, { email: usuario.email });
+
     console.log("  ✅ Contraseña reseteada para:", usuario.nombre);
     res.json({ 
       mensaje: "Contraseña reseteada correctamente",
@@ -681,6 +717,8 @@ app.put('/usuarios/:id/resetear-password', auth, esCoordinadorOAdmin, async (req
       return res.status(404).json({ error: "Usuario no encontrado" });
     }
 
+    await registrarAuditoria(req.user.nombre, 'usuarios', 'resetear_password_admin', req.params.id, { nombre: usuario.nombre }, { nombre: usuario.nombre, primeraVez: true });
+
     console.log("  ✅ Contraseña reseteada por:", req.user.nombre);
     console.log("  👤 Usuario afectado:", usuario.nombre);
     console.log("  🔐 primeraVez marcado como true");
@@ -705,6 +743,8 @@ app.post('/admin/actualizar-usuarios-primera-vez', async (req, res) => {
       { primeraVez: { $exists: false } },
       { $set: { primeraVez: true } }
     );
+
+    await registrarAuditoria('SISTEMA', 'usuarios', 'actualizar_usuarios_masivo', 'N/A', null, { actualizados: resultado.modifiedCount });
 
     console.log("  ✅ Usuarios actualizados:", resultado.modifiedCount);
     res.json({ 
@@ -749,37 +789,24 @@ app.post('/catalogo', auth, async (req, res) => {
     console.log("\n➕ POST /catalogo - User:", req.user.nombre);
     console.log("  📤 Datos recibidos:", req.body);
 
-const { tipificacion, actividad, diasHabiles, horasMinimas, horasMaximas } = req.body;
+    const { tipificacion, actividad, diasHabiles, horasMinimas, horasMaximas } = req.body;
 
-// Validaciones mejoradas
-if (!tipificacion || !tipificacion.trim()) {
-  return res.status(400).json({ 
-    error: "Tipificación es requerida",
-    campo: "tipificacion"
-  });
-}
-if (!actividad || !actividad.trim()) {
-  return res.status(400).json({ 
-    error: "Actividad es requerida",
-    campo: "actividad"
-  });
-}
-if (!diasHabiles || diasHabiles < 1) {
-  return res.status(400).json({ 
-    error: "Días hábiles debe ser mayor a 0",
-    campo: "diasHabiles"
-  });
-}
+    if (!tipificacion || !tipificacion.trim()) {
+      return res.status(400).json({ error: "Tipificación es requerida", campo: "tipificacion" });
+    }
+    if (!actividad || !actividad.trim()) {
+      return res.status(400).json({ error: "Actividad es requerida", campo: "actividad" });
+    }
+    if (!diasHabiles || diasHabiles < 1) {
+      return res.status(400).json({ error: "Días hábiles debe ser mayor a 0", campo: "diasHabiles" });
+    }
 
-const horasMin = horasMinimas ? parseInt(horasMinimas) : 0;
-const horasMax = horasMaximas ? parseInt(horasMaximas) : 0;
+    const horasMin = horasMinimas ? parseInt(horasMinimas) : 0;
+    const horasMax = horasMaximas ? parseInt(horasMaximas) : 0;
 
-if (horasMax > 0 && horasMin > horasMax) {
-  return res.status(400).json({ 
-    error: "Horas mínimas no puede ser mayor a horas máximas",
-    campo: "horas"
-  });
-}
+    if (horasMax > 0 && horasMin > horasMax) {
+      return res.status(400).json({ error: "Horas mínimas no puede ser mayor a horas máximas", campo: "horas" });
+    }
 
     const rol = req.user.rol?.toLowerCase();
     const esAutorizado = rol === 'coordinador' || rol === 'administrador' || rol === 'super_admin';
@@ -794,6 +821,8 @@ if (horasMax > 0 && horasMin > horasMax) {
       sugeridoPor: req.user.nombre,
       rolSugeridor: req.user.rol
     });
+
+    await registrarAuditoria(req.user.nombre, 'catalogo', 'crear_catalogo', nuevoItem._id, null, { tipificacion, actividad, diasHabiles });
 
     console.log("  ✅ Catálogo creado:", nuevoItem._id);
     console.log("  📋 Estado:", nuevoItem.estado);
@@ -814,6 +843,8 @@ app.put('/catalogo/:id', auth, esCoordinadorOAdmin, async (req, res) => {
 
     const { tipificacion, actividad, diasHabiles, horasMinimas, horasMaximas } = req.body;
 
+    const itemAnterior = await Catalogo.findById(req.params.id);
+
     const item = await Catalogo.findByIdAndUpdate(
       req.params.id,
       { tipificacion, actividad, diasHabiles, horasMinimas, horasMaximas },
@@ -823,6 +854,8 @@ app.put('/catalogo/:id', auth, esCoordinadorOAdmin, async (req, res) => {
     if (!item) {
       return res.status(404).json({ error: "Catálogo no encontrado" });
     }
+
+    await registrarAuditoria(req.user.nombre, 'catalogo', 'actualizar_catalogo', req.params.id, itemAnterior.toObject(), item.toObject());
 
     console.log("  ✅ Catálogo actualizado:", item._id);
     res.json(item);
@@ -850,6 +883,8 @@ app.patch('/catalogo/:id/aprobar', auth, esCoordinadorOAdmin, async (req, res) =
     if (!item) {
       return res.status(404).json({ error: "Catálogo no encontrado" });
     }
+
+    await registrarAuditoria(req.user.nombre, 'catalogo', 'aprobar_sugerencia', req.params.id, { estado: 'pendiente' }, { estado: 'oficial' });
 
     console.log("  ✅ Sugerencia aprobada:", item._id);
     console.log("  📋 Sugerencia de:", item.sugeridoPor);
@@ -883,6 +918,8 @@ app.patch('/catalogo/:id/rechazar', auth, esCoordinadorOAdmin, async (req, res) 
       return res.status(404).json({ error: "Catálogo no encontrado" });
     }
 
+    await registrarAuditoria(req.user.nombre, 'catalogo', 'rechazar_sugerencia', req.params.id, { estado: 'pendiente' }, { estado: 'rechazado', observaciones });
+
     console.log("  ✅ Sugerencia rechazada:", item._id);
     console.log("  📝 Observaciones:", observaciones);
 
@@ -908,6 +945,8 @@ app.delete('/catalogo/:id', auth, esCoordinadorOAdmin, async (req, res) => {
       return res.status(404).json({ error: "Catálogo no encontrado" });
     }
 
+    await registrarAuditoria(req.user.nombre, 'catalogo', 'eliminar_catalogo', req.params.id, { activo: true }, { activo: false });
+
     console.log("  ✅ Catálogo eliminado (desactivado):", item._id);
     res.json({ mensaje: "Catálogo eliminado correctamente" });
   } catch (err) {
@@ -929,52 +968,52 @@ app.post('/catalogo/importar', auth, esCoordinadorOAdmin, async (req, res) => {
     }
 
     const normalizar = (texto) => (texto || '').trim().toLowerCase();
+    const unicosEnArchivoMap = new Map();
 
-const unicosEnArchivoMap = new Map();
+    for (const item of items) {
+      const tipificacion = item?.tipificacion?.trim();
+      const actividad = item?.actividad?.trim();
 
-for (const item of items) {
-  const tipificacion = item?.tipificacion?.trim();
-  const actividad = item?.actividad?.trim();
+      if (!tipificacion || !actividad) {
+        continue;
+      }
 
-  if (!tipificacion || !actividad) {
-    continue;
-  }
+      const clave = normalizar(actividad);
 
-  const clave = normalizar(actividad);
+      if (!unicosEnArchivoMap.has(clave)) {
+        unicosEnArchivoMap.set(clave, {
+          tipificacion,
+          actividad,
+          diasHabiles: Number(item.diasHabiles) || 1,
+          horasMinimas: Number(item.horasMinimas) || 0,
+          horasMaximas: Number(item.horasMaximas) || 0,
+          observaciones: item?.observaciones?.trim() || '',
+          estado: 'oficial',
+          sugeridoPor: req.user.nombre,
+          rolSugeridor: req.user.rol,
+          fechaSugerencia: new Date(),
+          fechaCreacion: new Date(),
+          activo: true
+        });
+      }
+    }
 
-  if (!unicosEnArchivoMap.has(clave)) {
-    unicosEnArchivoMap.set(clave, {
-      tipificacion,
-      actividad,
-      diasHabiles: Number(item.diasHabiles) || 1,
-      horasMinimas: Number(item.horasMinimas) || 0,
-      horasMaximas: Number(item.horasMaximas) || 0,
-      observaciones: item?.observaciones?.trim() || '',
-      estado: 'oficial',
-      sugeridoPor: req.user.nombre,
-      rolSugeridor: req.user.rol,
-      fechaSugerencia: new Date(),
-      fechaCreacion: new Date(),
-      activo: true
+    const itemsUnicosArchivo = Array.from(unicosEnArchivoMap.values());
+
+    const existentes = await Catalogo.find({
+      activo: true,
+      actividad: { $in: itemsUnicosArchivo.map(item => item.actividad) }
+    }).select('actividad');
+
+    const existentesSet = new Set(
+      existentes.map(item => normalizar(item.actividad))
+    );
+
+    const nuevos = itemsUnicosArchivo.filter(item => {
+      const clave = normalizar(item.actividad);
+      return !existentesSet.has(clave);
     });
-  }
-}
 
-const itemsUnicosArchivo = Array.from(unicosEnArchivoMap.values());
-
-const existentes = await Catalogo.find({
-  activo: true,
-  actividad: { $in: itemsUnicosArchivo.map(item => item.actividad) }
-}).select('actividad');
-
-const existentesSet = new Set(
-  existentes.map(item => normalizar(item.actividad))
-);
-
-const nuevos = itemsUnicosArchivo.filter(item => {
-  const clave = normalizar(item.actividad);
-  return !existentesSet.has(clave);
-});
     if (nuevos.length === 0) {
       return res.status(400).json({
         error: "Todos los registros ya existen en la base de datos",
@@ -989,6 +1028,8 @@ const nuevos = itemsUnicosArchivo.filter(item => {
     }
 
     const insertados = await Catalogo.insertMany(nuevos);
+
+    await registrarAuditoria(req.user.nombre, 'catalogo', 'importar_catalogo', 'MASIVO', null, { cantidad: insertados.length });
 
     console.log("  ✅ Registros importados:", insertados.length);
 
@@ -1119,6 +1160,8 @@ app.post('/usuarios', auth, esCoordinadorOAdmin, async (req, res) => {
       primeraVez: true
     });
 
+    await registrarAuditoria(req.user.nombre, 'usuarios', 'crear_usuario', nuevoUsuario._id, null, { nombre, email, rol, grupo });
+
     console.log("  ✅ Usuario creado:", nuevoUsuario._id);
     console.log("  🔐 primeraVez:", nuevoUsuario.primeraVez);
     console.log("  📋 Datos guardados:", { nombre, email, rol, grupo, primeraVez: true });
@@ -1138,6 +1181,8 @@ app.put('/usuarios/:id', auth, esCoordinadorOAdmin, async (req, res) => {
 
     const { nombre, email, rol, grupo, activo } = req.body;
 
+    const usuarioAnterior = await User.findById(req.params.id);
+
     const usuario = await User.findByIdAndUpdate(
       req.params.id,
       { nombre, email, rol, grupo, activo },
@@ -1147,6 +1192,8 @@ app.put('/usuarios/:id', auth, esCoordinadorOAdmin, async (req, res) => {
     if (!usuario) {
       return res.status(404).json({ error: "Usuario no encontrado" });
     }
+
+    await registrarAuditoria(req.user.nombre, 'usuarios', 'actualizar_usuario', req.params.id, usuarioAnterior.toObject(), usuario.toObject());
 
     console.log("  ✅ Usuario actualizado:", usuario._id);
     console.log("  📋 Usuario actualizado:", { nombre, email, rol, grupo, activo });
@@ -1162,6 +1209,8 @@ app.delete('/usuarios/:id', auth, esCoordinadorOAdmin, async (req, res) => {
   try {
     console.log("\n🗑️ DELETE /usuarios/:id - User:", req.user.nombre);
 
+    const usuarioAnterior = await User.findById(req.params.id);
+
     const usuario = await User.findByIdAndUpdate(
       req.params.id,
       { activo: false },
@@ -1171,6 +1220,8 @@ app.delete('/usuarios/:id', auth, esCoordinadorOAdmin, async (req, res) => {
     if (!usuario) {
       return res.status(404).json({ error: "Usuario no encontrado" });
     }
+
+    await registrarAuditoria(req.user.nombre, 'usuarios', 'eliminar_usuario', req.params.id, { nombre: usuarioAnterior.nombre, activo: true }, { activo: false });
 
     console.log("  ✅ Usuario eliminado (desactivado):", usuario._id);
     res.json({ mensaje: "Usuario eliminado correctamente" });
@@ -1221,6 +1272,8 @@ app.post('/usuarios/:id/accesos', auth, esCoordinadorOAdmin, async (req, res) =>
 
     const resultado = await Acceso.insertMany(nuevosAccesos);
 
+    await registrarAuditoria(req.user.nombre, 'accesos', 'actualizar_accesos', usuarioId, null, { accesos: accesos.length });
+
     console.log("  ✅ Accesos actualizados:", resultado.length);
     res.json(resultado);
   } catch (err) {
@@ -1238,7 +1291,10 @@ app.get('/actividades', auth, async (req, res) => {
 
     const rol = req.user.rol?.toLowerCase();
     if (rol === 'lider') {
-      filtro.lider = req.user.nombre;
+      filtro.$or = [
+        { lider: req.user.nombre },
+        { liderSustituto: req.user.nombre }
+      ];
     }
 
     const actividades = await Actividad.find(filtro).sort({ fechaCreacion: -1 });
@@ -1268,7 +1324,6 @@ app.post('/actividades', auth, async (req, res) => {
     console.log("\n✏️ POST /actividades - User:", req.user.nombre);
     console.log("  📤 Body recibido:", JSON.stringify(req.body, null, 2));
 
-    // ✅ ACEPTAR AMBOS FORMATOS: antiguo y nuevo (para macro tareas)
     const { 
       nombre,
       lider,
@@ -1287,16 +1342,15 @@ app.post('/actividades', auth, async (req, res) => {
       indiceSecuencia = 0
     } = req.body;
 
-    // ✅ VALIDACIÓN: al menos nombre y lider
-if (!nombre || !nombre.trim()) {
-  return res.status(400).json({ error: "Nombre de actividad es requerido y no puede estar vacío" });
-}
-if (!lider || !lider.trim()) {
-  return res.status(400).json({ error: "Líder es requerido" });
-}
-if (nombre.length < 3) {
-  return res.status(400).json({ error: "El nombre debe tener al menos 3 caracteres" });
-}
+    if (!nombre || !nombre.trim()) {
+      return res.status(400).json({ error: "Nombre de actividad es requerido y no puede estar vacío" });
+    }
+    if (!lider || !lider.trim()) {
+      return res.status(400).json({ error: "Líder es requerido" });
+    }
+    if (nombre.length < 3) {
+      return res.status(400).json({ error: "El nombre debe tener al menos 3 caracteres" });
+    }
 
     const nueva = await Actividad.create({
       nombre,
@@ -1325,6 +1379,8 @@ if (nombre.length < 3) {
       observaciones: [],
       justificacionCierre: {}
     });
+
+    await registrarAuditoria(req.user.nombre, 'actividades', 'crear_actividad', nueva._id, null, { nombre, lider, proyecto, macroTareaId });
 
     console.log("  ✅ Actividad creada:", nueva._id);
     console.log("  📋 Nombre:", nueva.nombre);
@@ -1365,6 +1421,8 @@ app.put('/actividades/:id', auth, esSuperAdmin, async (req, res) => {
 
     console.log("  📤 Objeto actualizacion antes de guardar:", JSON.stringify(actualizacion, null, 2));
 
+    const actividadAnterior = await Actividad.findById(req.params.id);
+
     const actividad = await Actividad.findByIdAndUpdate(
       req.params.id,
       actualizacion,
@@ -1375,6 +1433,8 @@ app.put('/actividades/:id', auth, esSuperAdmin, async (req, res) => {
       console.log("  ❌ Actividad no encontrada con ID:", req.params.id);
       return res.status(404).json({ error: "Actividad no encontrada" });
     }
+
+    await registrarAuditoria(req.user.nombre, 'actividades', 'actualizar_actividad', req.params.id, { fechaCierre: actividadAnterior.fechaCierre }, { fechaCierre: actividad.fechaCierre });
 
     console.log("\n  ✅ DESPUÉS de guardar en BD:");
     console.log("  📤 fechaCierre en BD:", actividad.fechaCierre);
@@ -1437,6 +1497,8 @@ app.post('/actividades/:id/observaciones', auth, async (req, res) => {
 
     await actividad.save();
 
+    await registrarAuditoria(req.user.nombre, 'actividades', 'agregar_observacion', req.params.id, null, { comentario, horas, usuario: req.user.nombre });
+
     console.log("  ✅ Actividad guardada");
     console.log("  📋 Observaciones guardadas:", actividad.observaciones.length);
     console.log("  📋 Última observación guardada:", actividad.observaciones[actividad.observaciones.length - 1]);
@@ -1474,6 +1536,8 @@ app.post('/actividades/:id/cerrar', auth, async (req, res) => {
     actividad.estado = resolverEstadoCierre(actividad.fechaCierre);
 
     await actividad.save();
+
+    await registrarAuditoria(req.user.nombre, 'actividades', 'cerrar_actividad', req.params.id, { estado: 'en progreso' }, { estado: actividad.estado });
 
     console.log("  ✅ Actividad cerrada");
     console.log("  📅 Estado actualizado a:", actividad.estado);
@@ -1519,6 +1583,8 @@ app.post('/actividades/:id/validar-cierre', auth, async (req, res) => {
 
     await actividad.save();
 
+    await registrarAuditoria(req.user.nombre, 'actividades', 'justificar_cierre', req.params.id, { estado: 'en progreso' }, { estado: 'pendiente validacion', justificacion: texto });
+
     console.log("  ✅ Actividad actualizada a 'pendiente validacion'");
     console.log("  📋 Justificación registrada");
     console.log("  👤 Justificado por:", req.user.nombre);
@@ -1529,37 +1595,6 @@ app.post('/actividades/:id/validar-cierre', auth, async (req, res) => {
     });
 
     console.log("  📧 Notificando a coordinadores:", coordinadores.length);
-
-    if (coordinadores.length > 0) {
-      const mensaje = `
-⚠️ **NUEVA JUSTIFICACIÓN DE VENCIMIENTO**
-
-📋 **Actividad:** ${actividad.actividadCatalogo}
-👤 **Líder:** ${actividad.lider}
-📦 **Proyecto:** ${actividad.proyecto}
-📅 **Fecha de Cierre:** ${new Date(actividad.fechaCierre).toLocaleDateString()}
-
-**Justificación del Líder:**
-${texto}
-
-**Asunto del correo:** ${asunto || 'No especificado'}
-
-⏳ **Estado:** Pendiente de aprobación
-
-👉 Accede a: Aprobación de Vencimientos para revisar
-      `;
-
-      try {
-        await enviarAlCanalTeams(
-          '⚠️ Nueva Justificación de Vencimiento',
-          mensaje,
-          '#FF9800'
-        );
-        console.log("  ✅ Notificación enviada a Teams");
-      } catch (err) {
-        console.log("  ⚠️ Error al enviar notificación Teams:", err.message);
-      }
-    }
 
     res.json(actividad);
   } catch (err) {
@@ -1625,32 +1660,14 @@ app.post('/actividades/:id/aprobar-cierre', auth, esCoordinadorOAdmin, async (re
 
     await actividad.save();
 
+    await registrarAuditoria(req.user.nombre, 'actividades', 'aprobar_cierre_vencido', req.params.id, { estado: 'pendiente validacion' }, { estado: 'cerrada_vencida', aprobadoPor: req.user.nombre });
+
     console.log("  ✅ Actividad aprobada y cerrada");
     console.log("  📝 Comentario del coordinador:", comentario);
 
     const lider = await User.findOne({ nombre: actividad.lider });
     if (lider) {
       console.log("  📧 Notificando al líder:", lider.nombre);
-      try {
-        await enviarAlCanalTeams(
-          '✅ Tu justificación fue APROBADA',
-          `
-✅ **APROBACIÓN DE VENCIMIENTO**
-
-📋 **Actividad:** ${actividad.actividadCatalogo}
-📦 **Proyecto:** ${actividad.proyecto}
-
-**Decisión del Coordinador:**
-${comentario || 'Aprobado'}
-
-**Estado:** Cerrado
-**Guardado en Historial:** Sí
-          `,
-          '#4CAF50'
-        );
-      } catch (err) {
-        console.log("  ⚠️ Error al notificar Teams:", err.message);
-      }
     }
 
     res.json(actividad);
@@ -1722,33 +1739,13 @@ app.post('/actividades/:id/rechazar-cierre', auth, esCoordinadorOAdmin, async (r
 
     await actividad.save();
 
+    await registrarAuditoria(req.user.nombre, 'actividades', 'rechazar_cierre_vencido', req.params.id, { estado: 'pendiente validacion' }, { estado: 'en progreso', rechazadoPor: req.user.nombre });
+
     console.log("  ✅ Actividad rechazada - volviendo a 'en progreso'");
 
     const lider = await User.findOne({ nombre: actividad.lider });
     if (lider) {
       console.log("  📧 Notificando al líder:", lider.nombre);
-      try {
-        await enviarAlCanalTeams(
-          '❌ Tu justificación fue RECHAZADA',
-          `
-❌ **RECHAZO DE JUSTIFICACIÓN**
-
-📋 **Actividad:** ${actividad.actividadCatalogo}
-📦 **Proyecto:** ${actividad.proyecto}
-
-**Motivo del Rechazo:**
-${comentario}
-
-⏳ **Acción requerida:** Debes reenviar una justificación mejorada
-
-👉 Accede a: Mis Actividades para reenviar la justificación
-**Guardado en Historial:** Sí
-          `,
-          '#CC0000'
-        );
-      } catch (err) {
-        console.log("  ⚠️ Error al notificar Teams:", err.message);
-      }
     }
 
     res.json(actividad);
@@ -1845,100 +1842,6 @@ app.get('/historial-vencimientos-stats', auth, esCoordinadorOAdmin, async (req, 
   }
 });
 
-/* ================= RESUMEN CONSOLIDADO DE TAREAS - TEAMS ================= */
-app.post('/resumen-consolidado-tareas', async (req, res) => {
-  try {
-    console.log('\n📊 POST /resumen-consolidado-tareas');
-
-    const esLaboral = await esDiaLaboral();
-    if (!esLaboral) {
-      const diaSemana = new Date().getDay();
-      const dias = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-      console.log(`⏭️ ${dias[diaSemana]} - No es día laboral`);
-      return res.status(400).json({ error: 'No es un día laboral' });
-    }
-
-    const actividades = await Actividad.find({ estado: 'en progreso' });
-
-    const vencidas = [];
-    const proximasVencer = [];
-
-    for (const actividad of actividades) {
-      if (!actividad.fechaCierre) continue;
-
-      const diasRestantes = calcularDiasHabiles(new Date(), new Date(actividad.fechaCierre));
-
-      if (diasRestantes < 0) {
-        vencidas.push({
-          actividadCatalogo: actividad.actividadCatalogo,
-          lider: actividad.lider,
-          proyecto: actividad.proyecto
-        });
-      }
-
-      if (diasRestantes > 0 && diasRestantes <= 2) {
-        proximasVencer.push({
-          actividadCatalogo: actividad.actividadCatalogo,
-          lider: actividad.lider,
-          proyecto: actividad.proyecto,
-          diasRestantes: diasRestantes
-        });
-      }
-    }
-
-    if (vencidas.length > 0 || proximasVencer.length > 0) {
-      const tabla = generarTablaTeams(vencidas, proximasVencer);
-      const titulo = `📊 Resumen Diario - ${vencidas.length} Vencidas, ${proximasVencer.length} Próximas`;
-      
-      const enviado = await enviarAlCanalTeams(titulo, tabla, vencidas.length > 0 ? '#FF5252' : '#FF9800');
-
-      res.json({
-        mensaje: 'Resumen enviado a Teams',
-        vencidas: vencidas.length,
-        proximasVencer: proximasVencer.length,
-        enviado: enviado
-      });
-    } else {
-      res.json({
-        mensaje: 'No hay tareas para reportar',
-        vencidas: 0,
-        proximasVencer: 0
-      });
-    }
-  } catch (err) {
-    console.error('❌ Error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/* ================= CRON JOB - RESUMEN DIARIO ================= */
-cron.schedule('0 8 * * *', async () => {
-  try {
-    const esLaboral = await esDiaLaboral();
-    if (!esLaboral) {
-      const dias = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-      console.log(`\n⏭️ [CRON] ${dias[new Date().getDay()]} - No es día laboral`);
-      return;
-    }
-    console.log('\n📊 [CRON] 08:00 AM - Enviando resumen...');
-    await axios.post('http://localhost:3000/resumen-consolidado-tareas', {});
-  } catch (err) {
-    console.error('Error CRON:', err.message);
-  }
-});
-
-console.log(`
-⏰ ═════════════════════════════════════════
-   CONFIGURACIÓN DE RESUMEN DIARIO
-⏰ ═════════════════════════════════════════
-   • Horario: 08:00 AM
-   • Frecuencia: Diaria
-   • Días: Lunes a Viernes
-   • Excluye: Fines de semana y festivos
-   • Destino: Teams (canal configurado)
-⏰ ═════════════════════════════════════════
-`);
-
 /* ================= ASIGNACIONES - GET ================= */
 app.get('/asignaciones', auth, async (req, res) => {
   try {
@@ -1971,6 +1874,8 @@ app.post('/asignaciones', auth, async (req, res) => {
       fechaModificacion: new Date()
     });
 
+    await registrarAuditoria(req.user.nombre, 'asignaciones', 'crear_asignacion', nueva._id, null, req.body);
+
     console.log("  ✅ Asignación creada:", nueva._id);
     res.status(201).json(nueva);
   } catch (err) {
@@ -1992,6 +1897,8 @@ app.put('/asignaciones/:id', auth, async (req, res) => {
       return res.status(403).json({ error: "No tienes permisos para editar asignaciones" });
     }
 
+    const asignacionAnterior = await Asignacion.findById(req.params.id);
+
     const asignacion = await Asignacion.findByIdAndUpdate(
       req.params.id,
       { ...req.body, fechaModificacion: new Date() },
@@ -2002,8 +1909,108 @@ app.put('/asignaciones/:id', auth, async (req, res) => {
       return res.status(404).json({ error: "Asignación no encontrada" });
     }
 
+    await registrarAuditoria(req.user.nombre, 'asignaciones', 'actualizar_asignacion', req.params.id, asignacionAnterior.toObject(), asignacion.toObject());
+
     console.log("  ✅ Asignación actualizada:", asignacion._id);
     res.json(asignacion);
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= SUSTITUCIÓN TEMPORAL DE LÍDER ================= */
+app.post('/asignaciones/:id/sustituir-temporal', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n👥 POST /asignaciones/:id/sustituir-temporal - User:", req.user.nombre);
+    console.log("  📤 Datos recibidos:", req.body);
+
+    const { liderSustituto, razonSustituto } = req.body;
+
+    const asignacionAnterior = await Asignacion.findById(req.params.id);
+
+    if (!asignacionAnterior) {
+      return res.status(404).json({ error: "Asignación no encontrada" });
+    }
+
+    const asignacion = await Asignacion.findByIdAndUpdate(
+      req.params.id,
+      {
+        liderSustituto,
+        tipoSustituto: 'Temporal',
+        razonSustituto,
+        fechaModificacion: new Date()
+      },
+      { new: true }
+    );
+
+    // Marcar actividades del líder original como vistas desde el sustituto
+    await Actividad.updateMany(
+      { lider: asignacionAnterior.liderAsignado },
+      { liderSustituto },
+      { multi: true }
+    );
+
+    await registrarAuditoria(req.user.nombre, 'asignaciones', 'sustitucion_temporal', req.params.id, 
+      { liderAsignado: asignacionAnterior.liderAsignado }, 
+      { liderAsignado: asignacionAnterior.liderAsignado, liderSustituto, tipoSustituto: 'Temporal' },
+      `Sustitución temporal por ${razonSustituto}`,
+      razonSustituto
+    );
+
+    res.json({ mensaje: "Sustitución temporal registrada", asignacion });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= CAMBIO DEFINITIVO DE LÍDER ================= */
+app.post('/asignaciones/:id/cambiar-lider-definitivo', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n♻️ POST /asignaciones/:id/cambiar-lider-definitivo - User:", req.user.nombre);
+    console.log("  📤 Datos recibidos:", req.body);
+
+    const { liderNuevo } = req.body;
+
+    const asignacionAnterior = await Asignacion.findById(req.params.id);
+
+    if (!asignacionAnterior) {
+      return res.status(404).json({ error: "Asignación no encontrada" });
+    }
+
+    const liderAntiguo = asignacionAnterior.liderAsignado;
+
+    const asignacion = await Asignacion.findByIdAndUpdate(
+      req.params.id,
+      {
+        liderAsignado: liderNuevo,
+        liderSustituto: null,
+        tipoSustituto: 'Definitivo',
+        fechaModificacion: new Date()
+      },
+      { new: true }
+    );
+
+    // Migrar TODAS las actividades del líder antiguo al nuevo
+    const actividadesMigradas = await Actividad.updateMany(
+      { lider: liderAntiguo },
+      { lider: liderNuevo, liderSustituto: null },
+      { multi: true }
+    );
+
+    await registrarAuditoria(req.user.nombre, 'asignaciones', 'cambio_lider_definitivo', req.params.id,
+      { liderAsignado: liderAntiguo },
+      { liderAsignado: liderNuevo },
+      `Cambio definitivo: ${liderAntiguo} → ${liderNuevo}`,
+      'Salida de la compañía'
+    );
+
+    res.json({ 
+      mensaje: "Cambio de líder realizado definitivamente", 
+      asignacion,
+      actividadesMigradas: actividadesMigradas.modifiedCount
+    });
   } catch (err) {
     console.error("  ❌ Error:", err.message);
     res.status(500).json({ error: err.message });
@@ -2027,6 +2034,8 @@ app.delete('/asignaciones/:id', auth, async (req, res) => {
     if (!asignacion) {
       return res.status(404).json({ error: "Asignación no encontrada" });
     }
+
+    await registrarAuditoria(req.user.nombre, 'asignaciones', 'eliminar_asignacion', req.params.id, asignacion.toObject(), null);
 
     console.log("  ✅ Asignación eliminada:", req.params.id);
     res.json({ mensaje: "Asignación eliminada correctamente" });
@@ -2059,6 +2068,8 @@ app.post('/macro-tareas', auth, async (req, res) => {
       fechaModificacion: new Date()
     });
 
+    await registrarAuditoria(req.user.nombre, 'macro_tareas', 'crear_macro_tarea', nueva._id, null, { nombre, lider: liderInfraestructuraNombre, microTareas: microTareas.length });
+
     console.log("  ✅ Macro tarea creada:", nueva._id);
     console.log("  👤 Líder:", nueva.liderInfraestructuraNombre);
     console.log("  📋 Micro tareas:", nueva.microTareas.length);
@@ -2076,6 +2087,8 @@ app.put('/macro-tareas/:id', auth, async (req, res) => {
     console.log("\n✏️ PUT /macro-tareas/:id - User:", req.user.nombre);
     console.log("  📤 Datos recibidos:", req.body);
 
+    const macroTareaAnterior = await MacroTarea.findById(req.params.id);
+
     const macroTarea = await MacroTarea.findByIdAndUpdate(
       req.params.id,
       { ...req.body, fechaModificacion: new Date() },
@@ -2085,6 +2098,8 @@ app.put('/macro-tareas/:id', auth, async (req, res) => {
     if (!macroTarea) {
       return res.status(404).json({ error: "Macro tarea no encontrada" });
     }
+
+    await registrarAuditoria(req.user.nombre, 'macro_tareas', 'actualizar_macro_tarea', req.params.id, macroTareaAnterior.toObject(), macroTarea.toObject());
 
     console.log("  ✅ Macro tarea actualizada:", macroTarea._id);
     res.json(macroTarea);
@@ -2105,6 +2120,8 @@ app.delete('/macro-tareas/:id', auth, async (req, res) => {
       return res.status(404).json({ error: "Macro tarea no encontrada" });
     }
 
+    await registrarAuditoria(req.user.nombre, 'macro_tareas', 'eliminar_macro_tarea', req.params.id, macroTarea.toObject(), null);
+
     console.log("  ✅ Macro tarea eliminada:", req.params.id);
     res.json({ mensaje: "Macro tarea eliminada correctamente" });
   } catch (err) {
@@ -2114,9 +2131,6 @@ app.delete('/macro-tareas/:id', auth, async (req, res) => {
 });
 
 /* ================= MACRO TAREAS - GET ================= */
-const filtros = req.query.estado ? { estado: req.query.estado } : {};
-console.log("📋 GET /macro-tareas - Filtros aplicados:", JSON.stringify(filtros));
-const macroTareas = await MacroTarea.find(filtros).sort({ fechaCreacion: -1 });
 app.get('/macro-tareas', auth, async (req, res) => {
   try {
     console.log("\n📋 GET /macro-tareas - User:", req.user.nombre);
@@ -2170,7 +2184,6 @@ app.post('/festivos', auth, esAdministrador, async (req, res) => {
     console.log('  📅 Fecha ISO recibida:', fechaISO.toISOString());
     console.log('  📅 Fecha UTC:', fechaISO.getUTCDate(), '/', (fechaISO.getUTCMonth() + 1), '/', fechaISO.getUTCFullYear());
 
-    // Verificar si esta fecha está en uso en alguna actividad
     const actividades = await mongoose.connection.collection('actividades').find({
       estado: { $in: ['en progreso', 'pendiente validacion'] },
       fechaCreacion: { $lte: fechaISO },
@@ -2195,6 +2208,8 @@ app.post('/festivos', auth, esAdministrador, async (req, res) => {
 
     const resultado = await mongoose.connection.collection('festivos').insertOne(nuevoFestivo);
 
+    await registrarAuditoria(req.user.nombre, 'festivos', 'crear_festivo', resultado.insertedId, null, { fecha: fechaISO, descripcion });
+
     console.log('  ✅ Festivo agregado:', resultado.insertedId);
     res.status(201).json({ 
       mensaje: 'Festivo agregado correctamente',
@@ -2216,7 +2231,6 @@ app.delete('/festivos/:id', auth, esAdministrador, async (req, res) => {
       return res.status(400).json({ error: 'ID de festivo inválido' });
     }
 
-    // Obtener el festivo
     const festivo = await mongoose.connection.collection('festivos').findOne({
       _id: new mongoose.Types.ObjectId(req.params.id)
     });
@@ -2227,7 +2241,6 @@ app.delete('/festivos/:id', auth, esAdministrador, async (req, res) => {
 
     console.log('  📅 Festivo a eliminar:', festivo.fecha);
 
-    // Verificar si esta fecha está en uso en alguna actividad
     const actividades = await mongoose.connection.collection('actividades').find({
       estado: { $in: ['en progreso', 'pendiente validacion'] },
       fechaCreacion: { $lte: festivo.fecha },
@@ -2255,6 +2268,8 @@ app.delete('/festivos/:id', auth, esAdministrador, async (req, res) => {
       return res.status(404).json({ error: 'Festivo no encontrado' });
     }
 
+    await registrarAuditoria(req.user.nombre, 'festivos', 'eliminar_festivo', req.params.id, { fecha: festivo.fecha, descripcion: festivo.descripcion }, null);
+
     console.log('  ✅ Festivo eliminado');
     res.json({ mensaje: 'Festivo eliminado correctamente' });
   } catch (err) {
@@ -2278,7 +2293,13 @@ app.post('/festivos/guardar', auth, esAdministrador, async (req, res) => {
     const primerFestivo = new Date(festivos[0].fecha);
     const anio = primerFestivo.getFullYear();
 
-    // Eliminar festivos del año
+    const festividosAntiguos = await mongoose.connection.collection('festivos').find({
+      fecha: {
+        $gte: new Date(`${anio}-01-01`),
+        $lt: new Date(`${anio + 1}-01-01`)
+      }
+    }).toArray();
+
     await mongoose.connection.collection('festivos').deleteMany({
       fecha: {
         $gte: new Date(`${anio}-01-01`),
@@ -2295,6 +2316,8 @@ app.post('/festivos/guardar', auth, esAdministrador, async (req, res) => {
     }));
 
     const resultado = await mongoose.connection.collection('festivos').insertMany(festivosInsert);
+
+    await registrarAuditoria(req.user.nombre, 'festivos', 'importar_festivos', 'MASIVO', { cantidad: festividosAntiguos.length }, { cantidad: resultado.insertedCount });
 
     console.log('  ✅ Festivos guardados:', resultado.insertedCount);
     res.json({ 
@@ -2381,6 +2404,8 @@ app.post('/listas-maestras', auth, esCoordinadorOAdmin, async (req, res) => {
       fechaModificacion: new Date()
     });
 
+    await registrarAuditoria(req.user.nombre, 'listas_maestras', 'crear_lista_maestra', nuevoItem._id, null, { tipo, nombre, descripcion });
+
     console.log('  ✅ Lista maestra creada:', nuevoItem._id);
     res.status(201).json(nuevoItem);
   } catch (err) {
@@ -2433,6 +2458,8 @@ app.put('/listas-maestras/:id', auth, esCoordinadorOAdmin, async (req, res) => {
       { new: true, runValidators: false }
     );
 
+    await registrarAuditoria(req.user.nombre, 'listas_maestras', 'actualizar_lista_maestra', req.params.id, actual.toObject(), actualizado.toObject());
+
     console.log('  ✅ Lista maestra actualizada:', actualizado._id);
     res.json(actualizado);
   } catch (err) {
@@ -2471,6 +2498,8 @@ app.patch('/listas-maestras/:id/estado', auth, esCoordinadorOAdmin, async (req, 
       return res.status(404).json({ error: 'Registro no encontrado' });
     }
 
+    await registrarAuditoria(req.user.nombre, 'listas_maestras', 'cambiar_estado_lista_maestra', req.params.id, { activo: !activo }, { activo });
+
     console.log('  ✅ Estado actualizado:', actualizado._id, '->', actualizado.activo);
     res.json(actualizado);
   } catch (err) {
@@ -2494,6 +2523,8 @@ app.delete('/listas-maestras/:id', auth, esCoordinadorOAdmin, async (req, res) =
     if (!eliminado) {
       return res.status(404).json({ error: 'Registro no encontrado' });
     }
+
+    await registrarAuditoria(req.user.nombre, 'listas_maestras', 'eliminar_lista_maestra', req.params.id, eliminado.toObject(), null);
 
     console.log('  ✅ Registro eliminado:', eliminado._id);
     res.json({ mensaje: 'Registro eliminado correctamente' });
@@ -2562,6 +2593,8 @@ app.post('/listas-maestras/importar', auth, esCoordinadorOAdmin, async (req, res
 
     const resultado = await ListaMaestra.insertMany(nuevosDocumentos);
 
+    await registrarAuditoria(req.user.nombre, 'listas_maestras', 'importar_listas_maestras', 'MASIVO', null, { tipo, cantidad: resultado.length });
+
     console.log('  ✅ Registros importados:', resultado.length);
 
     res.status(201).json({
@@ -2569,6 +2602,146 @@ app.post('/listas-maestras/importar', auth, esCoordinadorOAdmin, async (req, res
       insertados: resultado.length,
       omitidos: documentos.length - nuevosDocumentos.length
     });
+  } catch (err) {
+    console.error('  ❌ Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= AUDITORÍA - GET ================= */
+app.get('/auditoria', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log('\n📊 GET /auditoria - User:', req.user.nombre);
+    console.log('  Query params:', req.query);
+
+    const { usuario, modulo, accion, registroId, desde, hasta, limite = 100 } = req.query;
+    const filtro = {};
+
+    if (usuario) filtro.usuario = usuario;
+    if (modulo) filtro.modulo = modulo;
+    if (accion) filtro.accion = accion;
+    if (registroId) filtro.registroId = registroId;
+
+    if (desde || hasta) {
+      filtro.fecha = {};
+      if (desde) filtro.fecha.$gte = new Date(desde);
+      if (hasta) filtro.fecha.$lte = new Date(hasta);
+    }
+
+    const registros = await Auditoria.find(filtro)
+      .sort({ fecha: -1 })
+      .limit(parseInt(limite));
+
+    console.log('  ✅ Registros de auditoría encontrados:', registros.length);
+    res.json(registros);
+  } catch (err) {
+    console.error('  ❌ Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= AUDITORÍA - ESTADÍSTICAS ================= */
+app.get('/auditoria/stats', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log('\n📊 GET /auditoria/stats - User:', req.user.nombre);
+
+    const total = await Auditoria.countDocuments();
+    
+    const porModulo = await Auditoria.aggregate([
+      {
+        $group: {
+          _id: '$modulo',
+          cantidad: { $sum: 1 }
+        }
+      },
+      { $sort: { cantidad: -1 } }
+    ]);
+
+    const porAccion = await Auditoria.aggregate([
+      {
+        $group: {
+          _id: '$accion',
+          cantidad: { $sum: 1 }
+        }
+      },
+      { $sort: { cantidad: -1 } }
+    ]);
+
+    const porUsuario = await Auditoria.aggregate([
+      {
+        $group: {
+          _id: '$usuario',
+          cantidad: { $sum: 1 }
+        }
+      },
+      { $sort: { cantidad: -1 } },
+      { $limit: 10 }
+    ]);
+
+    console.log('  ✅ Estadísticas calculadas');
+
+    res.json({
+      total,
+      porModulo,
+      porAccion,
+      porUsuario,
+      ultima_auditoria: await Auditoria.findOne().sort({ fecha: -1 })
+    });
+  } catch (err) {
+    console.error('  ❌ Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= EXPORTAR AUDITORÍA A EXCEL ================= */
+app.get('/auditoria/exportar/excel', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log('\n📥 GET /auditoria/exportar/excel - User:', req.user.nombre);
+
+    const registros = await Auditoria.find()
+      .sort({ fecha: -1 })
+      .lean();
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Auditoría');
+
+    worksheet.columns = [
+      { header: 'Usuario', key: 'usuario', width: 15 },
+      { header: 'Fecha', key: 'fecha', width: 20 },
+      { header: 'Módulo', key: 'modulo', width: 15 },
+      { header: 'Acción', key: 'accion', width: 20 },
+      { header: 'Registro ID', key: 'registroId', width: 25 },
+      { header: 'Razón', key: 'razon', width: 30 },
+      { header: 'Tipo Ausentismo', key: 'tipoAusentismo', width: 15 }
+    ];
+
+    worksheet.headerRow = 1;
+    worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFFFF' } };
+    worksheet.getRow(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE30613' }
+    };
+
+    registros.forEach((registro, index) => {
+      worksheet.addRow({
+        usuario: registro.usuario,
+        fecha: registro.fecha?.toLocaleString('es-CO') || '',
+        modulo: registro.modulo,
+        accion: registro.accion,
+        registroId: registro.registroId,
+        razon: registro.razon || '',
+        tipoAusentismo: registro.tipoAusentismo || ''
+      });
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=auditoria_${new Date().toISOString().split('T')[0]}.xlsx`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+
+    console.log('  ✅ Excel exportado correctamente');
   } catch (err) {
     console.error('  ❌ Error:', err.message);
     res.status(500).json({ error: err.message });
@@ -2584,374 +2757,6 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', secret: SECRET });
 });
 
-<<<<<<< HEAD
-=======
-/* ======================= NUEVOS ENDPOINTS ======================= */
-
-// ================= DASHBOARD INICIO - GET =================
-app.get('/api/inicio/dashboard', auth, async (req, res) => {
-  try {
-    console.log("\n📊 GET /api/inicio/dashboard - User:", req.user.nombre);
-
-    const rol = req.user.rol?.toLowerCase();
-    const usuarioData = await User.findById(req.user.id).select('-password');
-
-    // Obtener actividades
-    const misActividades = await Actividad.find({ lider: req.user.nombre });
-    const actividadesVencidas = misActividades.filter(a => {
-      return a.estado !== 'cerrado' && new Date(a.fechaCierre) < new Date();
-    });
-
-    // KPIs personalizados
-    let kpis = [];
-    if (rol === 'lider') {
-      kpis = [
-        { label: 'Mis Actividades', valor: misActividades.length, subtitulo: 'Abiertas', icono: '📋', color: '#457B9D' },
-        { label: 'Actividades de Mi Grupo', valor: 87, subtitulo: 'En Progreso', icono: '👥', color: '#06A77D' },
-        { label: 'Actividades Vencidas', valor: actividadesVencidas.length, subtitulo: 'Vencidas', icono: '⚠️', color: '#E63946' },
-        { label: 'Próximas a Vencer', valor: 8, subtitulo: 'Próximos 7 días', icono: '📅', color: '#F77F00' },
-        { label: 'Proyectos Activos', valor: 12, subtitulo: 'Asignados', icono: '📁', color: '#9C27B0' },
-        { label: 'Sin Seguimiento', valor: 8, subtitulo: 'Requieren gestión', icono: '⏱️', color: '#FF5252' }
-      ];
-    }
-
-    res.json({
-      success: true,
-      usuario: {
-        nombre: usuarioData?.nombre || req.user.nombre,
-        rol: rol,
-        email: usuarioData?.email
-      },
-      kpis,
-      misPendientes: misActividades.slice(0, 5).map(a => ({
-        id: a._id,
-        descripcion: a.actividadCatalogo,
-        proyecto: a.proyecto,
-        fecha: a.fechaCierre,
-        prioridad: 'Alta'
-      })),
-      actividadesProximas: [],
-      misProyectos: [],
-      alertas: [],
-      ultimasGestiones: [],
-      datosEstadoActividades: { datos: [] },
-      datosSemaforoGestion: { datos: [] }
-    });
-  } catch (err) {
-    console.error("  ❌ Error:", err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ================= APROBACIONES DE CIERRE - GET =================
-app.get('/api/aprobaciones-cierre', auth, esCoordinadorOAdmin, async (req, res) => {
-  try {
-    console.log("\n📋 GET /api/aprobaciones-cierre - User:", req.user.nombre);
-
-    const { proyecto, feature, responsable, macroTarea, estado, fechaDesde, fechaHasta } = req.query;
-    let filtro = {};
-
-    if (proyecto) filtro.proyecto = proyecto;
-    if (responsable) filtro['responsable.id'] = responsable;
-    if (estado === 'Pendientes') filtro.estado = 'Pendiente';
-    if (estado === 'Aprobadas') filtro.estado = 'Aprobado';
-    if (estado === 'Rechazadas') filtro.estado = 'Rechazado';
-
-    const solicitudes = await mongoose.connection.collection('solicitudes_cierre').find(filtro).toArray();
-
-    res.json({
-      success: true,
-      data: {
-        solicitudes,
-        total: solicitudes.length
-      }
-    });
-  } catch (err) {
-    console.error("  ❌ Error:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ================= APROBACIONES DE CIERRE - APROBAR =================
-app.post('/api/aprobaciones-cierre/:id/aprobar', auth, esCoordinadorOAdmin, async (req, res) => {
-  try {
-    console.log("\n✅ POST /api/aprobaciones-cierre/:id/aprobar - User:", req.user.nombre);
-
-    const solicitud = await mongoose.connection.collection('solicitudes_cierre').findOneAndUpdate(
-      { _id: new mongoose.Types.ObjectId(req.params.id) },
-      {
-        $set: {
-          estado: 'Aprobado',
-          aprobadoPor: req.user.nombre,
-          fechaAprobacion: new Date()
-        }
-      },
-      { returnDocument: 'after' }
-    );
-
-    res.json({ success: true, data: solicitud });
-  } catch (err) {
-    console.error("  ❌ Error:", err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ================= APROBACIONES DE CIERRE - RECHAZAR =================
-app.post('/api/aprobaciones-cierre/:id/rechazar', auth, esCoordinadorOAdmin, async (req, res) => {
-  try {
-    console.log("\n❌ POST /api/aprobaciones-cierre/:id/rechazar - User:", req.user.nombre);
-
-    const { motivo } = req.body;
-    const solicitud = await mongoose.connection.collection('solicitudes_cierre').findOneAndUpdate(
-      { _id: new mongoose.Types.ObjectId(req.params.id) },
-      {
-        $set: {
-          estado: 'Rechazado',
-          rechazadoPor: req.user.nombre,
-          motivoRechazo: motivo,
-          fechaRechazo: new Date()
-        }
-      },
-      { returnDocument: 'after' }
-    );
-
-    res.json({ success: true, data: solicitud });
-  } catch (err) {
-    console.error("  ❌ Error:", err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ================= ACTIVIDADES - AGRUPADAS =================
-app.get('/api/actividades/agrupadas', auth, async (req, res) => {
-  try {
-    console.log("\n📊 GET /api/actividades/agrupadas - User:", req.user.nombre);
-
-    const actividades = await Actividad.find({});
-
-    // Agrupar por proyecto y macro tarea
-    const agrupadas = {};
-    actividades.forEach(act => {
-      if (!agrupadas[act.proyecto]) {
-        agrupadas[act.proyecto] = { nombre: act.proyecto, macroTareas: {} };
-      }
-      if (!agrupadas[act.proyecto].macroTareas[act.macroTarea]) {
-        agrupadas[act.proyecto].macroTareas[act.macroTarea] = { nombre: act.macroTarea, actividades: [] };
-      }
-      agrupadas[act.proyecto].macroTareas[act.macroTarea].actividades.push(act);
-    });
-
-    res.json({ success: true, data: Object.values(agrupadas) });
-  } catch (err) {
-    console.error("  ❌ Error:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ================= ASIGNACIONES - CAPACIDAD =================
-app.get('/api/asignaciones/capacidad', auth, async (req, res) => {
-  try {
-    console.log("\n📊 GET /api/asignaciones/capacidad - User:", req.user.nombre);
-
-    const { proyecto, estado, rangoCapacidad } = req.query;
-
-    const lideres = await User.find({ rol: 'Líder' });
-
-const lideresConCapacidad = lideres.map(lider => {
-  const capacidadAsignada = Math.random() * 150; // Simulado
-  return {
-    _id: lider._id,
-    nombre: lider.nombre,
-    capacidadTotal: 100,
-    capacidadAsignada: Math.round(capacidadAsignada * 10) / 10,
-    capacidadDisponible: Math.round((100 - capacidadAsignada) * 10) / 10,
-    estado: capacidadAsignada < 100 ? 'Disponible' : capacidadAsignada < 120 ? 'Capacidad Comprometida' : 'Sobreasignado'
-  };
-});
-
-res.json({ success: true, data: { lideres: lideresConCapacidad, total: lideres.length } });
-  } catch (err) {
-    console.error("  ❌ Error:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ================= ASIGNACIONES PROYECTOS - CREAR =================
-app.post('/api/asignaciones-proyectos', auth, esCoordinadorOAdmin, async (req, res) => {
-  try {
-    console.log("\n✅ POST /api/asignaciones-proyectos - User:", req.user.nombre);
-
-    const datosAsignacion = req.body;
-
-    const nuevaAsignacion = new Asignacion({
-      ...datosAsignacion,
-      fechaCreacion: new Date(),
-      creadoPor: req.user.nombre,
-      estado: 'Vigente'
-    });
-
-    await nuevaAsignacion.save();
-
-    res.json({ success: true, data: nuevaAsignacion });
-  } catch (err) {
-    console.error("  ❌ Error:", err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ================= MACRO TAREAS - CREAR =================
-app.post('/api/macro-tareas', auth, async (req, res) => {
-  try {
-    console.log("\n✅ POST /api/macro-tareas - User:", req.user.nombre);
-
-    const datos = req.body;
-
-    const nuevaMacroTarea = new MacroTarea({
-      ...datos,
-      estado: 'Propuesta (Pendiente Aprobación)',
-      fechaCreacion: new Date(),
-      creadoPor: req.user.nombre
-    });
-
-    await nuevaMacroTarea.save();
-
-    res.json({ success: true, data: nuevaMacroTarea });
-  } catch (err) {
-    console.error("  ❌ Error:", err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ================= CATALOGO - CREAR ACTIVIDAD =================
-app.post('/api/catalogo', auth, async (req, res) => {
-  try {
-    console.log("\n✅ POST /api/catalogo - User:", req.user.nombre);
-
-    const { tipificacion, actividad, diasHabiles, horasMinimas, horasMaximas } = req.body;
-
-    const nuevaActividad = new CatalogoActividad({
-      tipificacion,
-      actividad,
-      diasHabiles,
-      horasMinimas,
-      horasMaximas,
-      estado: 'Pendiente',
-      fechaCreacion: new Date(),
-      creadoPor: req.user.nombre
-    });
-
-    await nuevaActividad.save();
-
-    res.json({ success: true, data: nuevaActividad });
-  } catch (err) {
-    console.error("  ❌ Error:", err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ================= CATALOGO - APROBAR =================
-app.patch('/api/catalogo/:id/aprobar', auth, esCoordinadorOAdmin, async (req, res) => {
-  try {
-    console.log("\n✅ PATCH /api/catalogo/:id/aprobar - User:", req.user.nombre);
-
-    const actividad = await CatalogoActividad.findByIdAndUpdate(
-      req.params.id,
-      {
-        estado: 'Vigente',
-        aprobadoPor: req.user.nombre,
-        fechaAprobacion: new Date()
-      },
-      { new: true }
-    );
-
-    res.json({ success: true, data: actividad });
-  } catch (err) {
-    console.error("  ❌ Error:", err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ================= CATALOGO - RECHAZAR =================
-app.patch('/api/catalogo/:id/rechazar', auth, esCoordinadorOAdmin, async (req, res) => {
-  try {
-    console.log("\n❌ PATCH /api/catalogo/:id/rechazar - User:", req.user.nombre);
-
-    const { observaciones } = req.body;
-
-    const actividad = await CatalogoActividad.findByIdAndUpdate(
-      req.params.id,
-      {
-        estado: 'Rechazado',
-        rechazadoPor: req.user.nombre,
-        observaciones,
-        fechaRechazo: new Date()
-      },
-      { new: true }
-    );
-
-    res.json({ success: true, data: actividad });
-  } catch (err) {
-    console.error("  ❌ Error:", err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ================= ACTIVIDADES - CREAR GESTIÓN =================
-app.post('/api/actividades/:id/gestiones', auth, async (req, res) => {
-  try {
-    console.log("\n✅ POST /api/actividades/:id/gestiones - User:", req.user.nombre);
-
-    const { comentario, horas, tipo } = req.body;
-
-    const nuevaGestion = {
-      _id: new mongoose.Types.ObjectId(),
-      fecha: new Date(),
-      usuario: req.user.nombre,
-      comentario,
-      horas,
-      tipo
-    };
-
-    const actividad = await Actividad.findByIdAndUpdate(
-      req.params.id,
-      {
-        $push: { gestiones: nuevaGestion },
-        ultimaGestion: new Date()
-      },
-      { new: true }
-    );
-
-    res.json({ success: true, data: actividad });
-  } catch (err) {
-    console.error("  ❌ Error:", err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ================= ACTIVIDADES - CERRAR =================
-app.post('/api/actividades/:id/cerrar', auth, async (req, res) => {
-  try {
-    console.log("\n✅ POST /api/actividades/:id/cerrar - User:", req.user.nombre);
-
-    const actividad = await Actividad.findByIdAndUpdate(
-      req.params.id,
-      {
-        estado: 'Cerrada',
-        fechaCierreReal: new Date(),
-        cierradoPor: req.user.nombre
-      },
-      { new: true }
-    );
-
-    res.json({ success: true, data: actividad });
-  } catch (err) {
-    console.error("  ❌ Error:", err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-console.log("\n✅ Nuevos endpoints agregados correctamente");
-
 /* ================= SERVER ================= */
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
@@ -2959,3 +2764,622 @@ app.listen(port, () => {
   console.log("🔐 JWT_SECRET:", SECRET);
   console.log("📊 MONGO_URI:", process.env.MONGO_URI ? "✅ Configurado" : "❌ NO Configurado");
 });
+
+module.exports = { app, Auditoria, User, Actividad, Asignacion, MacroTarea };
+// ================= DASHBOARDS - EJECUTIVO =================
+app.get('/api/dashboard/ejecutivo', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n📊 GET /api/dashboard/ejecutivo - User:", req.user.nombre);
+
+    const actividades = await Actividad.find({});
+    const usuarios = await User.find({ activo: true });
+
+    const actividadesAbiertas = actividades.filter(a => a.estado === 'en progreso').length;
+    const actividadesVencidas = actividades.filter(a => {
+      return a.estado !== 'cerrado' && new Date(a.fechaCierre) < new Date();
+    }).length;
+
+    const cumplimientoPorLider = await Actividad.aggregate([
+      {
+        $group: {
+          _id: '$lider',
+          total: { $sum: 1 },
+          completadas: {
+            $sum: { $cond: [{ $in: ['$estado', ['cerrado', 'cerrada_vencida']] }, 1, 0] }
+          }
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          total: 1,
+          completadas: 1,
+          porcentaje: { $round: [{ $multiply: [{ $divide: ['$completadas', '$total'] }, 100] }, 2] }
+        }
+      },
+      { $sort: { porcentaje: -1 } }
+    ]);
+
+    const productividadMensual = await Actividad.aggregate([
+      {
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m', date: '$fechaCreacion' } },
+          cantidad: { $sum: 1 },
+          completadas: {
+            $sum: { $cond: [{ $in: ['$estado', ['cerrado', 'cerrada_vencida']] }, 1, 0] }
+          }
+        }
+      },
+      { $sort: { _id: -1 } },
+      { $limit: 12 }
+    ]);
+
+    const tendenciaTrimestral = await Actividad.aggregate([
+      {
+        $group: {
+          _id: {
+            year: { $year: '$fechaCreacion' },
+            quarter: { $ceil: { $divide: [{ $month: '$fechaCreacion' }, 3] } }
+          },
+          cantidad: { $sum: 1 },
+          vencidas: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $ne: ['$estado', 'cerrado'] },
+                    { $lt: ['$fechaCierre', new Date()] }
+                  ]
+                },
+                1,
+                0
+              ]
+            }
+          }
+        }
+      },
+      { $sort: { '_id.year': -1, '_id.quarter': -1 } }
+    ]);
+
+    res.json({
+      success: true,
+      kpis: {
+        actividadesAbiertas,
+        actividadesVencidas,
+        cumplimientoPorLider,
+        productividadMensual,
+        tendenciaTrimestral
+      }
+    });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================= KPIs INDIVIDUALES =================
+app.get('/api/kpis/actividades-abiertas', auth, async (req, res) => {
+  try {
+    const cantidad = await Actividad.countDocuments({ estado: 'en progreso' });
+    res.json({ cantidad, estado: 'abierta' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/kpis/actividades-vencidas', auth, async (req, res) => {
+  try {
+    const hoy = new Date();
+    const cantidad = await Actividad.countDocuments({
+      estado: { $ne: 'cerrado' },
+      fechaCierre: { $lt: hoy }
+    });
+    res.json({ cantidad, estado: 'vencida' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/kpis/cumplimiento-lider', auth, async (req, res) => {
+  try {
+    const datos = await Actividad.aggregate([
+      {
+        $group: {
+          _id: '$lider',
+          total: { $sum: 1 },
+          completadas: {
+            $sum: { $cond: [{ $in: ['$estado', ['cerrado', 'cerrada_vencida']] }, 1, 0] }
+          }
+        }
+      },
+      {
+        $project: {
+          lider: '$_id',
+          total: 1,
+          completadas: 1,
+          porcentaje: { $round: [{ $multiply: [{ $divide: ['$completadas', '$total'] }, 100] }, 2] },
+          _id: 0
+        }
+      },
+      { $sort: { porcentaje: -1 } }
+    ]);
+    res.json(datos);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/kpis/cumplimiento-flujo-valor', auth, async (req, res) => {
+  try {
+    const datos = await Asignacion.aggregate([
+      {
+        $group: {
+          _id: '$flujoValor',
+          total: { $sum: 1 },
+          activos: { $sum: { $cond: [{ $eq: ['$estado', 'activo'] }, 1, 0] } }
+        }
+      },
+      {
+        $project: {
+          flujoValor: '$_id',
+          total: 1,
+          activos: 1,
+          porcentaje: { $round: [{ $multiply: [{ $divide: ['$activos', '$total'] }, 100] }, 2] },
+          _id: 0
+        }
+      },
+      { $sort: { porcentaje: -1 } }
+    ]);
+    res.json(datos);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/kpis/cumplimiento-celula', auth, async (req, res) => {
+  try {
+    const datos = await Asignacion.aggregate([
+      {
+        $group: {
+          _id: '$celula',
+          total: { $sum: 1 },
+          activos: { $sum: { $cond: [{ $eq: ['$estado', 'activo'] }, 1, 0] } }
+        }
+      },
+      {
+        $project: {
+          celula: '$_id',
+          total: 1,
+          activos: 1,
+          porcentaje: { $round: [{ $multiply: [{ $divide: ['$activos', '$total'] }, 100] }, 2] },
+          _id: 0
+        }
+      },
+      { $sort: { porcentaje: -1 } }
+    ]);
+    res.json(datos);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/kpis/productividad-mensual', auth, async (req, res) => {
+  try {
+    const datos = await Actividad.aggregate([
+      {
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m', date: '$fechaCreacion' } },
+          creadas: { $sum: 1 },
+          completadas: {
+            $sum: { $cond: [{ $in: ['$estado', ['cerrado', 'cerrada_vencida']] }, 1, 0] }
+          },
+          vencidas: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $ne: ['$estado', 'cerrado'] },
+                    { $lt: ['$fechaCierre', new Date()] }
+                  ]
+                },
+                1,
+                0
+              ]
+            }
+          }
+        }
+      },
+      { $sort: { _id: -1 } },
+      { $limit: 12 }
+    ]);
+    res.json(datos);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/kpis/tendencia-trimestral', auth, async (req, res) => {
+  try {
+    const datos = await Actividad.aggregate([
+      {
+        $group: {
+          _id: {
+            year: { $year: '$fechaCreacion' },
+            quarter: { $ceil: { $divide: [{ $month: '$fechaCreacion' }, 3] } }
+          },
+          cantidad: { $sum: 1 },
+          vencidas: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $ne: ['$estado', 'cerrado'] },
+                    { $lt: ['$fechaCierre', new Date()] }
+                  ]
+                },
+                1,
+                0
+              ]
+            }
+          }
+        }
+      },
+      { $sort: { '_id.year': -1, '_id.quarter': -1 } }
+    ]);
+    res.json(datos);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================= DASHBOARD TTM =================
+app.get('/api/dashboard/ttm', auth, esCoordinadorOAdmin, async (req, res) => {
+  try {
+    console.log("\n⏱ GET /api/dashboard/ttm - User:", req.user.nombre);
+
+    const actividades = await Actividad.find({});
+
+    const calcularLeadTime = (actividad) => {
+      const inicio = new Date(actividad.fechaCreacion);
+      const fin = actividad.fechaCierre ? new Date(actividad.fechaCierre) : new Date();
+      return Math.round((fin - inicio) / (1000 * 60 * 60 * 24));
+    };
+
+    const calcularCycleTime = (actividad) => {
+      if (!actividad.observaciones || actividad.observaciones.length === 0) return 0;
+      const primeraObs = new Date(actividad.observaciones[0].fecha);
+      const ultimaObs = new Date(actividad.observaciones[actividad.observaciones.length - 1].fecha);
+      return Math.round((ultimaObs - primeraObs) / (1000 * 60 * 60 * 24));
+    };
+
+    const leadTimes = actividades.map(a => calcularLeadTime(a));
+    const cycleTimes = actividades.map(a => calcularCycleTime(a));
+
+    const ttmPorFeature = await Actividad.aggregate([
+      {
+        $group: {
+          _id: '$proyecto',
+          promedio_lead_time: { $avg: { $subtract: [{ $toDate: '$fechaCierre' }, { $toDate: '$fechaCreacion' }] } },
+          cantidad: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const tiempoPorEtapa = await Actividad.aggregate([
+      {
+        $group: {
+          _id: '$estado',
+          cantidad: { $sum: 1 },
+          promedio_dias: {
+            $avg: {
+              $subtract: [
+                { $cond: ['$fechaCierre', { $toDate: '$fechaCierre' }, new Date()] },
+                { $toDate: '$fechaCreacion' }
+              ]
+            }
+          }
+        }
+      }
+    ]);
+
+    res.json({
+      success: true,
+      ttm: {
+        leadTimePromedio: Math.round(leadTimes.reduce((a, b) => a + b, 0) / (leadTimes.length || 1)),
+        cycleTimePromedio: Math.round(cycleTimes.reduce((a, b) => a + b, 0) / (cycleTimes.length || 1)),
+        ttmPorFeature,
+        tiempoPorEtapa
+      }
+    });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/ttm/lead-time', auth, async (req, res) => {
+  try {
+    const { feature, proyecto, flujoValor, celula } = req.query;
+    let filtro = {};
+
+    if (proyecto) filtro.proyecto = proyecto;
+    if (flujoValor) filtro.flujoValor = flujoValor;
+    if (celula) filtro.celula = celula;
+
+    const datos = await Actividad.find(filtro).lean();
+    const leadTimes = datos.map(a => ({
+      actividad: a.nombre,
+      leadTime: Math.round((new Date(a.fechaCierre) - new Date(a.fechaCreacion)) / (1000 * 60 * 60 * 24))
+    }));
+
+    res.json(leadTimes);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/ttm/cycle-time', auth, async (req, res) => {
+  try {
+    const { feature, proyecto, flujoValor, celula } = req.query;
+    let filtro = {};
+
+    if (proyecto) filtro.proyecto = proyecto;
+
+    const datos = await Actividad.find(filtro).lean();
+    const cycleTimes = datos.map(a => ({
+      actividad: a.nombre,
+      cycleTime: a.observaciones?.length > 0 ? 
+        Math.round((new Date(a.observaciones[a.observaciones.length - 1].fecha) - new Date(a.observaciones[0].fecha)) / (1000 * 60 * 60 * 24)) 
+        : 0
+    }));
+
+    res.json(cycleTimes);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/ttm/ttm', auth, async (req, res) => {
+  try {
+    const { feature, proyecto, flujoValor, celula } = req.query;
+    let filtro = {};
+
+    if (proyecto) filtro.proyecto = proyecto;
+
+    const datos = await Actividad.find(filtro).lean();
+    const ttm = datos.map(a => {
+      const leadTime = Math.round((new Date(a.fechaCierre) - new Date(a.fechaCreacion)) / (1000 * 60 * 60 * 24));
+      const cycleTime = a.observaciones?.length > 0 ? 
+        Math.round((new Date(a.observaciones[a.observaciones.length - 1].fecha) - new Date(a.observaciones[0].fecha)) / (1000 * 60 * 60 * 24)) 
+        : 0;
+      return {
+        actividad: a.nombre,
+        leadTime,
+        cycleTime,
+        ttm: leadTime - cycleTime
+      };
+    });
+
+    res.json(ttm);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/ttm/tiempo-etapa', auth, async (req, res) => {
+  try {
+    const { proyecto } = req.query;
+    let filtro = {};
+
+    if (proyecto) filtro.proyecto = proyecto;
+
+    const datos = await Actividad.aggregate([
+      { $match: filtro },
+      {
+        $group: {
+          _id: '$estado',
+          cantidad: { $sum: 1 },
+          promedio_dias: {
+            $avg: {
+              $divide: [
+                { $subtract: [{ $toDate: '$fechaCierre' }, { $toDate: '$fechaCreacion' }] },
+                86400000
+              ]
+            }
+          }
+        }
+      }
+    ]);
+
+    res.json(datos);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================= REPORTES - ACTIVIDADES =================
+app.get('/api/reportes/actividades', auth, async (req, res) => {
+  try {
+    console.log("\n📋 GET /api/reportes/actividades - User:", req.user.nombre);
+
+    const { estado, lider, proyecto, desde, hasta } = req.query;
+    let filtro = {};
+
+    if (estado) filtro.estado = estado;
+    if (lider) filtro.lider = lider;
+    if (proyecto) filtro.proyecto = proyecto;
+
+    if (desde || hasta) {
+      filtro.fechaCreacion = {};
+      if (desde) filtro.fechaCreacion.$gte = new Date(desde);
+      if (hasta) filtro.fechaCreacion.$lte = new Date(hasta);
+    }
+
+    const datos = await Actividad.find(filtro).lean();
+
+    res.json({
+      success: true,
+      total: datos.length,
+      datos
+    });
+  } catch (err) {
+    console.error("  ❌ Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================= EXPORTAR REPORTES EXCEL =================
+app.get('/api/reportes/exportar/actividades', auth, async (req, res) => {
+  try {
+    console.log("\n📥 GET /api/reportes/exportar/actividades - User:", req.user.nombre);
+
+    const { estado, lider, proyecto, desde, hasta } = req.query;
+    let filtro = {};
+
+    if (estado) filtro.estado = estado;
+    if (lider) filtro.lider = lider;
+    if (proyecto) filtro.proyecto = proyecto;
+
+    if (desde || hasta) {
+      filtro.fechaCreacion = {};
+      if (desde) filtro.fechaCreacion.$gte = new Date(desde);
+      if (hasta) filtro.fechaCreacion.$lte = new Date(hasta);
+    }
+
+    const datos = await Actividad.find(filtro).lean();
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Actividades');
+
+    worksheet.columns = [
+      { header: 'Nombre', key: 'nombre', width: 25 },
+      { header: 'Líder', key: 'lider', width: 15 },
+      { header: 'Proyecto', key: 'proyecto', width: 20 },
+      { header: 'Estado', key: 'estado', width: 15 },
+      { header: 'Fecha Inicio', key: 'fechaCreacion', width: 15 },
+      { header: 'Fecha Cierre', key: 'fechaCierre', width: 15 },
+      { header: 'Horas Acum.', key: 'horasAcumuladas', width: 12 },
+      { header: 'Observaciones', key: 'observaciones', width: 30 }
+    ];
+
+    worksheet.headerRow = 1;
+    worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    worksheet.getRow(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE30613' }
+    };
+
+    datos.forEach((actividad) => {
+      worksheet.addRow({
+        nombre: actividad.nombre,
+        lider: actividad.lider,
+        proyecto: actividad.proyecto,
+        estado: actividad.estado,
+        fechaCreacion: actividad.fechaCreacion?.toLocaleDateString('es-CO') || '',
+        fechaCierre: actividad.fechaCierre?.toLocaleDateString('es-CO') || '',
+        horasAcumuladas: actividad.horasAcumuladas,
+        observaciones: actividad.observaciones?.length || 0
+      });
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=actividades_${new Date().toISOString().split('T')[0]}.xlsx`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+
+    console.log('  ✅ Excel exportado correctamente');
+  } catch (err) {
+    console.error('  ❌ Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================= EXPORTAR ASIGNACIONES EXCEL =================
+app.get('/api/reportes/exportar/asignaciones', auth, async (req, res) => {
+  try {
+    console.log("\n📥 GET /api/reportes/exportar/asignaciones - User:", req.user.nombre);
+
+    const datos = await Asignacion.find({}).lean();
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Asignaciones');
+
+    worksheet.columns = [
+      { header: 'Líder', key: 'liderAsignado', width: 15 },
+      { header: 'Líder Sustituto', key: 'liderSustituto', width: 15 },
+      { header: 'Tipo Sustitución', key: 'tipoSustituto', width: 15 },
+      { header: 'Proyecto', key: 'proyecto', width: 20 },
+      { header: 'Porcentaje', key: 'porcentajeAsignacion', width: 12 },
+      { header: 'Estado', key: 'estado', width: 12 },
+      { header: 'Flujo Valor', key: 'flujoValor', width: 15 },
+      { header: 'Célula', key: 'celula', width: 12 }
+    ];
+
+    worksheet.headerRow = 1;
+    worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    worksheet.getRow(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE30613' }
+    };
+
+    datos.forEach((asignacion) => {
+      worksheet.addRow({
+        liderAsignado: asignacion.liderAsignado,
+        liderSustituto: asignacion.liderSustituto || 'N/A',
+        tipoSustituto: asignacion.tipoSustituto || 'N/A',
+        proyecto: asignacion.proyecto,
+        porcentajeAsignacion: asignacion.porcentajeAsignacion,
+        estado: asignacion.estado,
+        flujoValor: asignacion.flujoValor,
+        celula: asignacion.celula
+      });
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=asignaciones_${new Date().toISOString().split('T')[0]}.xlsx`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+
+    console.log('  ✅ Excel exportado correctamente');
+  } catch (err) {
+    console.error('  ❌ Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================= EXPORTAR AUDITORÍA EXCEL (YA INCLUIDO ARRIBA) =================
+
+// ================= CRON JOB - RESUMEN DIARIO ================= 
+cron.schedule('0 8 * * *', async () => {
+  try {
+    const esLaboral = await esDiaLaboral();
+    if (!esLaboral) {
+      const dias = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+      console.log(`\n⏭️ [CRON] ${dias[new Date().getDay()]} - No es día laboral`);
+      return;
+    }
+    console.log('\n📊 [CRON] 08:00 AM - Enviando resumen...');
+
+    const actividades = await Actividad.find({ estado: 'en progreso' });
+    const vencidas = actividades.filter(a => new Date(a.fechaCierre) < new Date());
+
+    console.log(`📊 Resumen: ${actividades.length} activas, ${vencidas.length} vencidas`);
+  } catch (err) {
+    console.error('Error CRON:', err.message);
+  }
+});
+
+console.log(`
+⏰ ═════════════════════════════════════════
+   CONFIGURACIÓN DE RESUMEN DIARIO
+⏰ ═════════════════════════════════════════
+   • Horario: 08:00 AM
+   • Frecuencia: Diaria
+   • Días: Lunes a Viernes
+   • Excluye: Fines de semana y festivos
+⏰ ═════════════════════════════════════════
+`);
