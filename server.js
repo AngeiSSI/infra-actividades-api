@@ -749,11 +749,37 @@ app.post('/catalogo', auth, async (req, res) => {
     console.log("\n➕ POST /catalogo - User:", req.user.nombre);
     console.log("  📤 Datos recibidos:", req.body);
 
-    const { tipificacion, actividad, diasHabiles, horasMinimas, horasMaximas } = req.body;
+const { tipificacion, actividad, diasHabiles, horasMinimas, horasMaximas } = req.body;
 
-    if (!tipificacion || !actividad || !diasHabiles) {
-      return res.status(400).json({ error: "Faltan campos requeridos" });
-    }
+// Validaciones mejoradas
+if (!tipificacion || !tipificacion.trim()) {
+  return res.status(400).json({ 
+    error: "Tipificación es requerida",
+    campo: "tipificacion"
+  });
+}
+if (!actividad || !actividad.trim()) {
+  return res.status(400).json({ 
+    error: "Actividad es requerida",
+    campo: "actividad"
+  });
+}
+if (!diasHabiles || diasHabiles < 1) {
+  return res.status(400).json({ 
+    error: "Días hábiles debe ser mayor a 0",
+    campo: "diasHabiles"
+  });
+}
+
+const horasMin = horasMinimas ? parseInt(horasMinimas) : 0;
+const horasMax = horasMaximas ? parseInt(horasMaximas) : 0;
+
+if (horasMax > 0 && horasMin > horasMax) {
+  return res.status(400).json({ 
+    error: "Horas mínimas no puede ser mayor a horas máximas",
+    campo: "horas"
+  });
+}
 
     const rol = req.user.rol?.toLowerCase();
     const esAutorizado = rol === 'coordinador' || rol === 'administrador' || rol === 'super_admin';
@@ -1262,11 +1288,15 @@ app.post('/actividades', auth, async (req, res) => {
     } = req.body;
 
     // ✅ VALIDACIÓN: al menos nombre y lider
-    if (!nombre || !lider) {
-      return res.status(400).json({ 
-        error: "Faltan campos requeridos: nombre y lider" 
-      });
-    }
+if (!nombre || !nombre.trim()) {
+  return res.status(400).json({ error: "Nombre de actividad es requerido y no puede estar vacío" });
+}
+if (!lider || !lider.trim()) {
+  return res.status(400).json({ error: "Líder es requerido" });
+}
+if (nombre.length < 3) {
+  return res.status(400).json({ error: "El nombre debe tener al menos 3 caracteres" });
+}
 
     const nueva = await Actividad.create({
       nombre,
@@ -2084,6 +2114,9 @@ app.delete('/macro-tareas/:id', auth, async (req, res) => {
 });
 
 /* ================= MACRO TAREAS - GET ================= */
+const filtros = req.query.estado ? { estado: req.query.estado } : {};
+console.log("📋 GET /macro-tareas - Filtros aplicados:", JSON.stringify(filtros));
+const macroTareas = await MacroTarea.find(filtros).sort({ fechaCreacion: -1 });
 app.get('/macro-tareas', auth, async (req, res) => {
   try {
     console.log("\n📋 GET /macro-tareas - User:", req.user.nombre);
