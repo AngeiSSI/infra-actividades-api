@@ -2724,19 +2724,19 @@ app.get('/api/asignaciones/capacidad', auth, async (req, res) => {
 
     const lideres = await User.find({ rol: 'Líder' });
 
-    const lideresCon Capacidad = lideres.map(lider => {
-      const capacidadAsignada = Math.random() * 150; // Simulado
-      return {
-        _id: lider._id,
-        nombre: lider.nombre,
-        capacidadTotal: 100,
-        capacidadAsignada: Math.round(capacidadAsignada * 10) / 10,
-        capacidadDisponible: Math.round((100 - capacidadAsignada) * 10) / 10,
-        estado: capacidadAsignada < 100 ? 'Disponible' : capacidadAsignada < 120 ? 'Capacidad Comprometida' : 'Sobreasignado'
-      };
-    });
+const lideresConCapacidad = lideres.map(lider => {
+  const capacidadAsignada = Math.random() * 150; // Simulado
+  return {
+    _id: lider._id,
+    nombre: lider.nombre,
+    capacidadTotal: 100,
+    capacidadAsignada: Math.round(capacidadAsignada * 10) / 10,
+    capacidadDisponible: Math.round((100 - capacidadAsignada) * 10) / 10,
+    estado: capacidadAsignada < 100 ? 'Disponible' : capacidadAsignada < 120 ? 'Capacidad Comprometida' : 'Sobreasignado'
+  };
+});
 
-    res.json({ success: true, data: { lideres: lideresConCapacidad, total: lideres.length } });
+res.json({ success: true, data: { lideres: lideresConCapacidad, total: lideres.length } });
   } catch (err) {
     console.error("  ❌ Error:", err.message);
     res.status(500).json({ error: err.message });
@@ -2919,7 +2919,6 @@ app.post('/api/actividades/:id/cerrar', auth, async (req, res) => {
 
 console.log("\n✅ Nuevos endpoints agregados correctamente");
 
->>>>>>> b1a8601 (Reportes)
 /* ================= SERVER ================= */
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
